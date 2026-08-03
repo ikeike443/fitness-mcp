@@ -6,6 +6,13 @@ import {
   getWorkoutDetail,
   getBodyMeasurements,
 } from "@/lib/hevy";
+import {
+  getDailyMacros,
+  getWeightTrend,
+  getNutritionTrends,
+} from "@/lib/macrofactorStore";
+
+export const maxDuration = 30;
 
 const handler = createMcpHandler(
   (server) => {
@@ -81,6 +88,100 @@ const handler = createMcpHandler(
           content: [
             { type: "text", text: JSON.stringify(measurements, null, 2) },
           ],
+        };
+      }
+    );
+
+    server.registerTool(
+      "get_daily_macros",
+      {
+        title: "Get daily MacroFactor calories and macros",
+        description:
+          "Get daily calories, protein, carbs, fat, and step count from MacroFactor for a date range or the last N days. Automatically pulls in any newly exported MacroFactor data from Google Drive first, so it reflects the most recent manual export.",
+        inputSchema: z.object({
+          days: z
+            .number()
+            .int()
+            .min(1)
+            .max(90)
+            .optional()
+            .describe(
+              "Number of most recent days to return (default 14, max 90). Ignored if startDate is given."
+            ),
+          startDate: z
+            .string()
+            .optional()
+            .describe("Start date YYYY-MM-DD (inclusive)"),
+          endDate: z
+            .string()
+            .optional()
+            .describe("End date YYYY-MM-DD (inclusive), default today"),
+        }),
+      },
+      async ({ days, startDate, endDate }) => {
+        const macros = await getDailyMacros({ days, startDate, endDate });
+        return {
+          content: [{ type: "text", text: JSON.stringify(macros, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "get_weight_trend",
+      {
+        title: "Get MacroFactor weight trend",
+        description:
+          "Get daily body weight, MacroFactor's smoothed weight trend, and body fat % over a date range or the last N days. Automatically pulls in any newly exported MacroFactor data first.",
+        inputSchema: z.object({
+          days: z
+            .number()
+            .int()
+            .min(1)
+            .max(180)
+            .optional()
+            .describe(
+              "Number of most recent days to return (default 30, max 180). Ignored if startDate is given."
+            ),
+          startDate: z
+            .string()
+            .optional()
+            .describe("Start date YYYY-MM-DD (inclusive)"),
+          endDate: z
+            .string()
+            .optional()
+            .describe("End date YYYY-MM-DD (inclusive), default today"),
+        }),
+      },
+      async ({ days, startDate, endDate }) => {
+        const trend = await getWeightTrend({ days, startDate, endDate });
+        return {
+          content: [{ type: "text", text: JSON.stringify(trend, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "get_nutrition_trends",
+      {
+        title: "Get precomputed MacroFactor monthly/yearly trends",
+        description:
+          "Get precomputed average calories/macros/steps and weight change for a whole month or year. Cheap: reads a precomputed summary instead of rescanning all daily data.",
+        inputSchema: z.object({
+          period: z
+            .enum(["month", "year"])
+            .describe("Aggregation period"),
+          key: z
+            .string()
+            .optional()
+            .describe(
+              "'YYYY-MM' for month or 'YYYY' for year; defaults to the current month/year"
+            ),
+        }),
+      },
+      async ({ period, key }) => {
+        const trends = await getNutritionTrends({ period, key });
+        return {
+          content: [{ type: "text", text: JSON.stringify(trends, null, 2) }],
         };
       }
     );
