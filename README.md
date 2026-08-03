@@ -1,5 +1,7 @@
 # fitness-mcp
 
+![CI](https://github.com/ikeike443/fitness-mcp/actions/workflows/ci.yml/badge.svg)
+
 A personal remote MCP (Model Context Protocol) server that lets Claude read your [Hevy](https://hevy.com) workout data and [MacroFactor](https://macrofactorapp.com) nutrition data directly in conversation. Deployed on Vercel's free Hobby tier.
 
 ## Status
@@ -59,6 +61,23 @@ curl -X POST http://localhost:3000/api/mcp \
 ```
 
 Should return the 6 tools above. A request with a missing/wrong token should get `401`.
+
+## Testing
+
+Three layers, all run in CI (`.github/workflows/ci.yml`) on every push/PR — none require real Hevy/Google secrets, so they work the same in a public repo:
+
+```bash
+npm run test        # unit + integration (vitest) — pure logic, plus lib/googleDrive.ts
+                     # mocked with an in-memory fake Drive, plus the real Next.js
+                     # route handler exercised with fetch/Drive mocked
+npm run build
+npm run test:e2e     # starts a real `next start` server and hits it over real HTTP
+                      # (node's built-in test runner, no extra dependency)
+```
+
+- **Unit** (`lib/*.test.ts`): date parsing, MacroFactor tab parsing, monthly/yearly rollup math, bearer-token verification.
+- **Integration** (`test/integration/*.test.ts`): the MacroFactor sync algorithm (multi-export merge, overlap resolution, incremental rollups) against `test/fixtures/fakeGoogleDrive.ts`; and the actual `app/api/mcp/route.ts` handler wired to real `lib/auth.ts`/`lib/hevy.ts`/`lib/macrofactorStore.ts`, with only `fetch` and Drive mocked.
+- **E2E** (`test/e2e/*.e2e.test.mjs`): boots the production build and asserts over real HTTP — health check, 401 on bad/missing auth, `tools/list` returns all 6 tools. Doesn't exercise real Hevy/MacroFactor data (CI has no real credentials by design).
 
 ## Environment variables
 

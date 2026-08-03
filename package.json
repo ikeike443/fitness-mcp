@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run --exclude '**/e2e/**'",
+    "test:watch": "vitest --exclude '**/e2e/**'",
+    "test:e2e": "node --test test/e2e/*.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
@@ -23,6 +26,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }
