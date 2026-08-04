@@ -7,7 +7,7 @@ import {
   batchGetTabValues,
 } from "./googleDrive";
 
-const HEALTH_DATA_FOLDER_ID = "1935fgdgA5VVjTp9olOZ39Q0c5mv8Vx4B";
+export const HEALTH_DATA_FOLDER_ID = "1935fgdgA5VVjTp9olOZ39Q0c5mv8Vx4B";
 const STORE_FOLDER_NAME = "_store";
 const META_FILE = "meta.json";
 const DAILY_FILE = "daily-summary.json";
@@ -62,14 +62,14 @@ export interface YearlyRollup extends PeriodStats {
   monthsWithData: string[];
 }
 
-function parseExportedAtFromName(name: string): string | null {
+export function parseExportedAtFromName(name: string): string | null {
   const m = name.match(/^MacroFactor-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
   if (!m) return null;
   const [, y, mo, d, h, mi, s] = m;
   return `${y}-${mo}-${d}T${h}:${mi}:${s}Z`;
 }
 
-function normalizeDate(raw: string): string | null {
+export function normalizeDate(raw: string): string | null {
   const trimmed = raw.trim();
   const slashMatch = trimmed.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
   if (slashMatch) {
@@ -95,7 +95,7 @@ function parseNumber(raw: string | undefined): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function parseTabRows(
+export function parseTabRows(
   tabName: string,
   rows: string[][]
 ): Record<string, Partial<DailyEntry>> {
@@ -185,14 +185,14 @@ function computePeriodStats(daily: DailySummary, dates: string[]): PeriodStats {
   };
 }
 
-function computeMonthlyRollup(daily: DailySummary, month: string): MonthlyRollup {
+export function computeMonthlyRollup(daily: DailySummary, month: string): MonthlyRollup {
   const dates = Object.keys(daily)
     .filter((d) => d.startsWith(month))
     .sort();
   return { month, ...computePeriodStats(daily, dates) };
 }
 
-function computeYearlyRollup(daily: DailySummary, year: string): YearlyRollup {
+export function computeYearlyRollup(daily: DailySummary, year: string): YearlyRollup {
   const dates = Object.keys(daily)
     .filter((d) => d.startsWith(year))
     .sort();
@@ -277,7 +277,7 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function resolveRange(
+export function resolveRange(
   opts: { days?: number; startDate?: string; endDate?: string },
   defaultDays: number,
   maxDays: number
