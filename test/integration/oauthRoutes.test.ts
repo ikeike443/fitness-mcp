@@ -75,6 +75,12 @@ describe("GET /api/oauth/authorize", () => {
     expect(res.status).toBe(400);
   });
 
+  it("fails closed with a clean 500 (not an unhandled exception) when OAUTH_CLIENT_SECRET is unset", async () => {
+    delete process.env.OAUTH_CLIENT_SECRET;
+    const res = await authorizeGET(authorizeRequest());
+    expect(res.status).toBe(500);
+  });
+
   it("redirects with error=unauthorized_client for a wrong client_id", async () => {
     const res = await authorizeGET(authorizeRequest({ client_id: "wrong-client" }));
     expect(res.status).toBe(302);

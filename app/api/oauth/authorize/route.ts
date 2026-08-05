@@ -12,6 +12,14 @@ export async function GET(req: Request) {
   if (!redirectUri || !isAllowedRedirectUri(redirectUri)) {
     return new Response("Invalid or disallowed redirect_uri", { status: 400 });
   }
+  if (!process.env.OAUTH_CLIENT_SECRET) {
+    // createAuthorizationCode signs with OAUTH_CLIENT_SECRET and throws if
+    // it's unset — fail closed with a clean response instead of an
+    // unhandled exception when only OAUTH_CLIENT_ID was configured.
+    return new Response("Server misconfigured: OAUTH_CLIENT_SECRET is not set", {
+      status: 500,
+    });
+  }
 
   const state = params.get("state");
   const responseType = params.get("response_type");
