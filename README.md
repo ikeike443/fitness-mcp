@@ -46,6 +46,30 @@ MacroFactor has no usable API, so data instead flows: **MacroFactor app → manu
 7. In Google Drive, share the **"Health data"** folder with the service account's email (the `client_email` field in the JSON key) as **Editor** — the app creates and writes to a `_store` subfolder inside it.
 8. No domain-wide delegation needed — this is a personal Gmail account, a plain folder share is enough.
 
+## Authentication
+
+Claude's "Request headers" option for custom connectors (a static `Authorization: Bearer <token>` header) is still in beta and not available on every account. So this server also implements a minimal **OAuth 2.1 authorization server** (Authorization Code + PKCE) at `/api/oauth/authorize` and `/api/oauth/token`, purely so Claude's standard OAuth Client ID/Secret fields work as an always-available fallback.
+
+There's no login screen and no client database — `/authorize` auto-approves. That's safe because the real credential check happens at `/token`: a code can only be exchanged for an access token by presenting the correct `OAUTH_CLIENT_SECRET`, which never appears in a browser-visible URL (only `client_id` does, at `/authorize`). The access token it returns is just `MCP_BEARER_TOKEN` itself, so the resource-server check (`lib/auth.ts`) doesn't change depending on which path a client used to get it. See `lib/oauth.ts` for the full reasoning, including the accepted tradeoffs (no server-side session/code storage — codes are self-contained, HMAC-signed, and expire in 60s).
+
+### Generating the three secrets from one memorable passphrase
+
+`MCP_BEARER_TOKEN`, `OAUTH_CLIENT_ID`, and `OAUTH_CLIENT_SECRET` can all be derived deterministically from a single master passphrase, so losing the stored values isn't a disaster — just re-derive them:
+
+```bash
+export MASTER_PASSPHRASE="<your own long, random passphrase — e.g. openssl rand -base64 24>"
+
+derive() {
+  echo -n "$1" | openssl dgst -sha256 -hmac "$MASTER_PASSPHRASE" -hex | awk '{print $2}'
+}
+
+derive "fitness-mcp:bearer-token"        # → MCP_BEARER_TOKEN
+derive "fitness-mcp:oauth-client-id"     # → OAUTH_CLIENT_ID
+derive "fitness-mcp:oauth-client-secret" # → OAUTH_CLIENT_SECRET
+```
+
+The label strings aren't secret (they're safe to keep in this README) — only `MASTER_PASSPHRASE` is. Running `derive` again with the same passphrase always reproduces the same values.
+
 ## Local development
 
 ```bash
@@ -79,16 +103,18 @@ npm run test:e2e     # starts a real `next start` server and hits it over real H
                       # (node's built-in test runner, no extra dependency)
 ```
 
-- **Unit** (`lib/*.test.ts`): date parsing, MacroFactor tab parsing, monthly/yearly rollup math, bearer-token verification.
-- **Integration** (`test/integration/*.test.ts`): the MacroFactor sync algorithm (multi-export merge, overlap resolution, incremental rollups) against `test/fixtures/fakeGoogleDrive.ts`; and the actual `app/api/mcp/route.ts` handler wired to real `lib/auth.ts`/`lib/hevy.ts`/`lib/macrofactorStore.ts`, with only `fetch` and Drive mocked.
-- **E2E** (`test/e2e/*.e2e.test.mjs`): boots the production build and asserts over real HTTP — health check, 401 on bad/missing auth, `tools/list` returns all 6 tools. Doesn't exercise real Hevy/MacroFactor data (CI has no real credentials by design).
+- **Unit** (`lib/*.test.ts`): date parsing, MacroFactor tab parsing, monthly/yearly rollup math, bearer-token verification, OAuth code signing/PKCE/redirect-URI allowlisting (including the RFC 7636 PKCE test vector).
+- **Integration** (`test/integration/*.test.ts`): the MacroFactor sync algorithm (multi-export merge, overlap resolution, incremental rollups) against `test/fixtures/fakeGoogleDrive.ts`; the real `app/api/mcp/route.ts` handler wired to real `lib/auth.ts`/`lib/hevy.ts`/`lib/macrofactorStore.ts` with only `fetch` and Drive mocked; the real `/api/oauth/authorize` and `/api/oauth/token` route handlers; and the `.well-known` OAuth metadata routes.
+- **E2E** (`test/e2e/*.e2e.test.mjs`): boots the production build and asserts over real HTTP — health check, 401 on bad/missing auth, `tools/list` returns all 6 tools, OAuth discovery metadata, and a full authorization-code + PKCE round trip that ends with a working access token against `/api/mcp`. Doesn't exercise real Hevy/MacroFactor data (CI has no real credentials by design).
 
 ## Environment variables
 
 | Variable | Purpose |
 |---|---|
 | `HEVY_API_KEY` | Hevy Pro API key from https://hevy.com/settings?developer |
-| `MCP_BEARER_TOKEN` | Shared secret this server requires on every request. Generate with `openssl rand -hex 32` |
+| `MCP_BEARER_TOKEN` | Shared secret this server requires on every request, and the access_token our OAuth flow issues — see Authentication above |
+| `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` | Credentials for this server's own minimal OAuth authorization server — see Authentication above |
+| `OAUTH_ALLOWED_REDIRECT_HOSTS` | Optional. Comma-separated allowlist for `/api/oauth/authorize`'s `redirect_uri`. Defaults to `claude.ai,claude.com` |
 | `GOOGLE_SERVICE_ACCOUNT_KEY_BASE64` | Base64-encoded service-account JSON key with Drive/Sheets access to the "Health data" folder — see setup steps above |
 
 Set these in the Vercel project's Environment Variables (Production + Preview). Never commit real values — `.env.example` only documents the names.
@@ -96,7 +122,7 @@ Set these in the Vercel project's Environment Variables (Production + Preview). 
 ## Deploy
 
 1. `vercel link`
-2. `vercel env add HEVY_API_KEY` / `vercel env add MCP_BEARER_TOKEN` / `vercel env add GOOGLE_SERVICE_ACCOUNT_KEY_BASE64` (repeat for each environment you use)
+2. `vercel env add HEVY_API_KEY` / `vercel env add MCP_BEARER_TOKEN` / `vercel env add OAUTH_CLIENT_ID` / `vercel env add OAUTH_CLIENT_SECRET` / `vercel env add GOOGLE_SERVICE_ACCOUNT_KEY_BASE64` (repeat for each environment you use)
 3. Connect this GitHub repo in the Vercel dashboard for auto-deploy on push to `main`, or run `vercel --prod` manually.
 4. Note the deployed URL. `fitness-mcp.vercel.app` is often already taken by an unrelated project on Vercel's shared `.vercel.app` namespace — check the actual assigned domain under Project → Settings → Domains (or `vercel inspect <deployment-url>`). This project's production URL is `https://fitness-mcp-eight.vercel.app/api/mcp`.
 
@@ -106,7 +132,8 @@ Custom connectors can only be **added** from claude.ai (web) or the desktop app 
 
 1. On claude.ai: Settings → Connectors → Add custom connector.
 2. Name: `Fitness Data`. URL: `https://fitness-mcp-eight.vercel.app/api/mcp`.
-3. Under "Request headers", add `Authorization: Bearer <MCP_BEARER_TOKEN>` (the same value set in Vercel).
-4. Save. Claude should list the 6 tools above.
+3. If your account has the "Request headers" beta: add `Authorization: Bearer <MCP_BEARER_TOKEN>` there and skip to step 5.
+4. Otherwise, open Advanced settings and fill in **OAuth Client ID** / **OAuth Client Secret** with the `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` values set in Vercel. Claude will discover the `/authorize` and `/token` endpoints automatically via this server's `.well-known` metadata.
+5. Save. Claude should list the 6 tools above.
 
 Try asking: "直近のワークアウトを教えて" (tell me about my recent workouts) or "今月の平均カロリーは?" (what's my average calorie intake this month?).
