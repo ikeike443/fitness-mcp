@@ -4,6 +4,10 @@
 
 A personal remote MCP (Model Context Protocol) server that lets Claude read your [Hevy](https://hevy.com) workout data and [MacroFactor](https://macrofactorapp.com) nutrition data directly in conversation. Deployed on Vercel's free Hobby tier.
 
+## License
+
+[MIT](./LICENSE)
+
 ## Status
 
 - **Hevy**: implemented (read-only: recent workouts, workout detail, body measurements). Uses the official Hevy REST API directly.
