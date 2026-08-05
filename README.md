@@ -98,14 +98,14 @@ Set these in the Vercel project's Environment Variables (Production + Preview). 
 1. `vercel link`
 2. `vercel env add HEVY_API_KEY` / `vercel env add MCP_BEARER_TOKEN` / `vercel env add GOOGLE_SERVICE_ACCOUNT_KEY_BASE64` (repeat for each environment you use)
 3. Connect this GitHub repo in the Vercel dashboard for auto-deploy on push to `main`, or run `vercel --prod` manually.
-4. Note the deployed URL, e.g. `https://fitness-mcp.vercel.app/api/mcp`.
+4. Note the deployed URL. `fitness-mcp.vercel.app` is often already taken by an unrelated project on Vercel's shared `.vercel.app` namespace — check the actual assigned domain under Project → Settings → Domains (or `vercel inspect <deployment-url>`). This project's production URL is `https://fitness-mcp-eight.vercel.app/api/mcp`.
 
 ## Connect to Claude
 
 Custom connectors can only be **added** from claude.ai (web) or the desktop app — not from the mobile app. Once added there, they're usable from mobile automatically.
 
 1. On claude.ai: Settings → Connectors → Add custom connector.
-2. Name: `Fitness Data`. URL: `https://fitness-mcp.vercel.app/api/mcp`.
+2. Name: `Fitness Data`. URL: `https://fitness-mcp-eight.vercel.app/api/mcp`.
 3. Under "Request headers", add `Authorization: Bearer <MCP_BEARER_TOKEN>` (the same value set in Vercel).
 4. Save. Claude should list the 6 tools above.
 
