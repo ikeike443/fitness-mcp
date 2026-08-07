@@ -37,14 +37,20 @@ MacroFactor has no usable API, so data instead flows: **MacroFactor app → manu
 
 ### Setting up Google Drive access (one-time)
 
+This app authenticates as **your own Google account** via OAuth — not a service account. A service account was tried first and doesn't work on a personal (non-Workspace) Gmail account: service accounts have zero Drive storage quota of their own, so `files.create` (and sometimes even `files.update`) gets rejected with `Service Accounts do not have storage quota`, even when the target folder is shared with them as Editor. Shared Drives and domain-wide delegation both sidestep that, but both are Google Workspace–only features. Authenticating as the real account avoids the problem entirely — and as a bonus, there's no folder-sharing step, since the app acts as the account that already owns "Health data".
+
 1. Create or select a Google Cloud project.
 2. Enable the **Google Drive API** and **Google Sheets API** for it.
-3. Create a **Service Account** (IAM & Admin → Service Accounts). No IAM roles needed.
-4. Create and download a **JSON key** for the service account.
-5. Base64-encode it: `base64 -w0 key.json`
-6. Set the result as the `GOOGLE_SERVICE_ACCOUNT_KEY_BASE64` env var (see below).
-7. In Google Drive, share the **"Health data"** folder with the service account's email (the `client_email` field in the JSON key) as **Editor** — the app creates and writes to a `_store` subfolder inside it.
-8. No domain-wide delegation needed — this is a personal Gmail account, a plain folder share is enough.
+3. Create an **OAuth 2.0 Client ID** (APIs & Services → Credentials → Create Credentials → OAuth client ID) of type **Desktop app**.
+4. Add `http://localhost:8877` as an authorized redirect URI for it.
+5. Note the generated Client ID and Client Secret.
+6. Run the included helper script once, locally (not on Vercel), to get a refresh token:
+   ```bash
+   GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... \
+     node scripts/get-google-refresh-token.mjs
+   ```
+   It prints a URL — open it, sign in with the Google account that owns "Health data", and approve. The script then prints a refresh token.
+7. Set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and `GOOGLE_OAUTH_REFRESH_TOKEN` (see below) — the refresh token doesn't expire on its own, so this is a one-time setup.
 
 ## Authentication
 
@@ -115,14 +121,14 @@ npm run test:e2e     # starts a real `next start` server and hits it over real H
 | `MCP_BEARER_TOKEN` | Shared secret this server requires on every request, and the access_token our OAuth flow issues — see Authentication above |
 | `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` | Credentials for this server's own minimal OAuth authorization server — see Authentication above |
 | `OAUTH_ALLOWED_REDIRECT_HOSTS` | Optional. Comma-separated allowlist for `/api/oauth/authorize`'s `redirect_uri`. Defaults to `claude.ai,claude.com` |
-| `GOOGLE_SERVICE_ACCOUNT_KEY_BASE64` | Base64-encoded service-account JSON key with Drive/Sheets access to the "Health data" folder — see setup steps above |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `GOOGLE_OAUTH_REFRESH_TOKEN` | OAuth credentials for this app's Drive/Sheets access to your own Google account — see setup steps above |
 
 Set these in the Vercel project's Environment Variables (Production + Preview). Never commit real values — `.env.example` only documents the names.
 
 ## Deploy
 
 1. `vercel link`
-2. `vercel env add HEVY_API_KEY` / `vercel env add MCP_BEARER_TOKEN` / `vercel env add OAUTH_CLIENT_ID` / `vercel env add OAUTH_CLIENT_SECRET` / `vercel env add GOOGLE_SERVICE_ACCOUNT_KEY_BASE64` (repeat for each environment you use)
+2. `vercel env add HEVY_API_KEY` / `vercel env add MCP_BEARER_TOKEN` / `vercel env add OAUTH_CLIENT_ID` / `vercel env add OAUTH_CLIENT_SECRET` / `vercel env add GOOGLE_OAUTH_CLIENT_ID` / `vercel env add GOOGLE_OAUTH_CLIENT_SECRET` / `vercel env add GOOGLE_OAUTH_REFRESH_TOKEN` (repeat for each environment you use)
 3. Connect this GitHub repo in the Vercel dashboard for auto-deploy on push to `main`, or run `vercel --prod` manually.
 4. Note the deployed URL. `fitness-mcp.vercel.app` is often already taken by an unrelated project on Vercel's shared `.vercel.app` namespace — check the actual assigned domain under Project → Settings → Domains (or `vercel inspect <deployment-url>`). This project's production URL is `https://fitness-mcp-eight.vercel.app/api/mcp`.
 
