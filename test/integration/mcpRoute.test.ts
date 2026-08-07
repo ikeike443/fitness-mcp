@@ -146,6 +146,38 @@ describe("POST /api/mcp tools/call — Hevy (real lib/hevy.ts, fetch mocked)", (
     expect(status).toBe(200);
     expect(json.result.isError).toBe(true);
   });
+
+  it("get_body_measurements returns recent measurements from the Hevy API response", async () => {
+    // Regression test: the Hevy API wraps the list under "body_measurements",
+    // not "measurements" — a mismatch here previously crashed the tool with
+    // "Cannot read properties of undefined (reading 'map')".
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toContain("api.hevyapp.com/v1/body_measurements");
+        return new Response(
+          JSON.stringify({
+            page: 1,
+            page_count: 1,
+            body_measurements: [
+              { date: "2026-08-01", weight_kg: 70.5, fat_percent: 15.2 },
+            ],
+          }),
+          { status: 200 }
+        );
+      })
+    );
+
+    const { json } = await callMcp(
+      { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "get_body_measurements", arguments: {} } },
+      AUTH_HEADER
+    );
+
+    const measurements = JSON.parse(json.result.content[0].text);
+    expect(measurements).toEqual([
+      { date: "2026-08-01", weightKg: 70.5, fatPercent: 15.2 },
+    ]);
+  });
 });
 
 describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mocked)", () => {

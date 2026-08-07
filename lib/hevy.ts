@@ -75,7 +75,7 @@ interface HevyBodyMeasurement {
 interface HevyBodyMeasurementsResponse {
   page: number;
   page_count: number;
-  measurements: HevyBodyMeasurement[];
+  body_measurements: HevyBodyMeasurement[];
 }
 
 function summarizeWorkout(w: HevyWorkout) {
@@ -125,7 +125,7 @@ export async function getBodyMeasurements(limit = 10) {
   const data = await hevyFetch<HevyBodyMeasurementsResponse>(
     `/v1/body_measurements?page=1&pageSize=${pageSize}`
   );
-  return data.measurements.map((m) => ({
+  return data.body_measurements.map((m) => ({
     date: m.date,
     weightKg: m.weight_kg,
     fatPercent: m.fat_percent,
