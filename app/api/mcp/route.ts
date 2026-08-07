@@ -270,7 +270,7 @@ const handler = createMcpHandler(
       {
         title: "Search Hevy exercise templates",
         description:
-          "Search Hevy's exercise library by name to find the exact exercise_template_id required by create_routine/update_routine. Returns candidate exercises (id, title, muscle group, equipment) — never auto-pick or invent an ID from this list; if there are multiple plausible matches, ask the user to confirm which one before using it.",
+          "Search Hevy's exercise library by name to find the exact exercise_template_id required by create_routine/update_routine. Returns candidate exercises (id, title, muscle group) — never auto-pick or invent an ID from this list; if there are multiple plausible matches, ask the user to confirm which one before using it.",
         inputSchema: z.object({
           query: z
             .string()

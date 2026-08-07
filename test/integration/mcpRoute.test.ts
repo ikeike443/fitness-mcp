@@ -161,7 +161,6 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
       type: "weight_reps",
       primary_muscle_group: "chest",
       secondary_muscle_groups: [],
-      equipment: "barbell",
       is_custom: false,
     },
     {
@@ -170,7 +169,6 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
       type: "weight_reps",
       primary_muscle_group: "back",
       secondary_muscle_groups: [],
-      equipment: "barbell",
       is_custom: false,
     },
     {
@@ -179,7 +177,6 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
       type: "weight_reps",
       primary_muscle_group: "legs",
       secondary_muscle_groups: [],
-      equipment: "machine",
       is_custom: false,
     },
   ];
@@ -212,7 +209,7 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
 
     const results = JSON.parse(json.result.content[0].text);
     expect(results).toEqual([
-      { id: "tmpl-bench", title: "Bench Press (Barbell)", muscleGroup: "chest", equipment: "barbell" },
+      { id: "tmpl-bench", title: "Bench Press (Barbell)", muscleGroup: "chest" },
     ]);
   });
 
@@ -290,6 +287,33 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     });
   });
 
+  it("update_routine is rejected before touching the Hevy API when confirm is not true", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { status, json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 15,
+        method: "tools/call",
+        params: {
+          name: "update_routine",
+          arguments: {
+            routineId: "routine-1",
+            title: "Tuesday: Back & Legs (v2)",
+            exercises: [{ exerciseTemplateId: "tmpl-deadlift", sets: [{ type: "normal", reps: 4 }] }],
+          },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    expect(status).toBe(200);
+    expect(json.result.isError).toBe(true);
+    expect(json.result.content[0].text).toMatch(/confirm/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("update_routine PUTs to the routine's id when confirmed", async () => {
     vi.stubGlobal(
       "fetch",
@@ -334,6 +358,29 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     expect(routine.title).toBe("Tuesday: Back & Legs (v2)");
   });
 
+  it("create_routine_folder is rejected before touching the Hevy API when confirm is not true", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { status, json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 16,
+        method: "tools/call",
+        params: {
+          name: "create_routine_folder",
+          arguments: { title: "週3回メニュー" },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    expect(status).toBe(200);
+    expect(json.result.isError).toBe(true);
+    expect(json.result.content[0].text).toMatch(/confirm/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("create_routine_folder POSTs the folder and returns its id", async () => {
     vi.stubGlobal(
       "fetch",
@@ -342,13 +389,11 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
         expect(init.method).toBe("POST");
         return new Response(
           JSON.stringify({
-            routine_folder: {
-              id: 7,
-              title: "週3回メニュー",
-              index: 0,
-              created_at: "2026-08-01T00:00:00Z",
-              updated_at: "2026-08-01T00:00:00Z",
-            },
+            id: 7,
+            title: "週3回メニュー",
+            index: 0,
+            created_at: "2026-08-01T00:00:00Z",
+            updated_at: "2026-08-01T00:00:00Z",
           }),
           { status: 201 }
         );
@@ -382,13 +427,11 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
         if (url.endsWith("/v1/routine_folders")) {
           return new Response(
             JSON.stringify({
-              routine_folder: {
-                id: 99,
-                title: "週3回メニュー",
-                index: 0,
-                created_at: "2026-08-01T00:00:00Z",
-                updated_at: "2026-08-01T00:00:00Z",
-              },
+              id: 99,
+              title: "週3回メニュー",
+              index: 0,
+              created_at: "2026-08-01T00:00:00Z",
+              updated_at: "2026-08-01T00:00:00Z",
             }),
             { status: 201 }
           );

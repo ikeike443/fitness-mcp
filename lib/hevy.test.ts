@@ -223,6 +223,17 @@ describe("updateRoutine", () => {
     ).rejects.toThrow(/must not contain "@"/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("URL-encodes a routineId containing special characters", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/routines/foo%2Fbar..");
+      return jsonResponse(routineApiResponse, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateRoutine("foo/bar..", baseInput);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("createRoutineFolder", () => {
@@ -234,13 +245,11 @@ describe("createRoutineFolder", () => {
         routine_folder: { title: "Cut phase" },
       });
       return jsonResponse({
-        routine_folder: {
-          id: 42,
-          title: "Cut phase",
-          index: 0,
-          created_at: "2026-08-01T00:00:00Z",
-          updated_at: "2026-08-01T00:00:00Z",
-        },
+        id: 42,
+        title: "Cut phase",
+        index: 0,
+        created_at: "2026-08-01T00:00:00Z",
+        updated_at: "2026-08-01T00:00:00Z",
       });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -270,7 +279,6 @@ describe("searchExerciseTemplates", () => {
         type: "weight_reps",
         primary_muscle_group: "back",
         secondary_muscle_groups: [],
-        equipment: "barbell",
         is_custom: false,
       })),
     };
@@ -295,7 +303,6 @@ describe("searchExerciseTemplates", () => {
       id: "1",
       title: "Bench Press (Barbell)",
       muscleGroup: "back",
-      equipment: "barbell",
     });
   });
 
@@ -312,6 +319,17 @@ describe("searchExerciseTemplates", () => {
     const results = await search("bench", 10);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(results.map((r) => r.id).sort()).toEqual(["1", "2"]);
+  });
+
+  it("rejects a whitespace-only query without calling fetch", async () => {
+    const search = await freshSearchExerciseTemplates();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(search("   ")).rejects.toThrow(
+      /query must not be empty or whitespace-only/
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("caches pages across calls within the TTL and refetches after it expires", async () => {

@@ -166,7 +166,6 @@ interface HevyExerciseTemplate {
   type: string;
   primary_muscle_group: string;
   secondary_muscle_groups: string[];
-  equipment?: string;
   is_custom: boolean;
 }
 
@@ -294,22 +293,22 @@ export async function updateRoutine(
   routineId: string,
   input: UpdateRoutineInput
 ) {
-  const routine = await hevyFetch<HevyRoutine>(`/v1/routines/${routineId}`, {
-    method: "PUT",
-    body: toHevyRoutineBody(input),
-  });
+  const routine = await hevyFetch<HevyRoutine>(
+    `/v1/routines/${encodeURIComponent(routineId)}`,
+    {
+      method: "PUT",
+      body: toHevyRoutineBody(input),
+    }
+  );
   return toRoutineOutput(routine);
 }
 
 export async function createRoutineFolder(title: string) {
-  const folder = await hevyFetch<{ routine_folder: HevyRoutineFolder }>(
-    "/v1/routine_folders",
-    {
-      method: "POST",
-      body: { routine_folder: { title } },
-    }
-  );
-  return { id: folder.routine_folder.id, title: folder.routine_folder.title };
+  const folder = await hevyFetch<HevyRoutineFolder>("/v1/routine_folders", {
+    method: "POST",
+    body: { routine_folder: { title } },
+  });
+  return { id: folder.id, title: folder.title };
 }
 
 // --- Exercise template search -------------------------------------------
@@ -361,9 +360,12 @@ async function listAllExerciseTemplates(): Promise<HevyExerciseTemplate[]> {
 }
 
 export async function searchExerciseTemplates(query: string, limit = 10) {
+  const q = query.trim().toLowerCase();
+  if (q === "") {
+    throw new Error("query must not be empty or whitespace-only");
+  }
   const resultLimit = Math.min(Math.max(limit, 1), 25);
   const all = await listAllExerciseTemplates();
-  const q = query.trim().toLowerCase();
   return all
     .filter((t) => t.title.toLowerCase().includes(q))
     .slice(0, resultLimit)
@@ -371,6 +373,5 @@ export async function searchExerciseTemplates(query: string, limit = 10) {
       id: t.id,
       title: t.title,
       muscleGroup: t.primary_muscle_group,
-      equipment: t.equipment ?? null,
     }));
 }
