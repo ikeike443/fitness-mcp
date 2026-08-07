@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 
 process.env.HEVY_API_KEY = "dummy-hevy-key";
 
-import { createRoutine, updateRoutine, createRoutineFolder } from "./hevy";
+import {
+  createRoutine,
+  updateRoutine,
+  createRoutineFolder,
+  listRoutineFolders,
+} from "./hevy";
 import type { CreateRoutineInput } from "./hevy";
 
 function jsonResponse(body: unknown, status = 200) {
@@ -302,6 +307,80 @@ describe("createRoutineFolder", () => {
     await expect(createRoutineFolder("Cut phase")).rejects.toThrow(
       /Unexpected Hevy routine_folder response shape/
     );
+  });
+});
+
+describe("listRoutineFolders", () => {
+  it("GETs a single page and returns id/title/index", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe(
+        "https://api.hevyapp.com/v1/routine_folders?page=1&pageSize=10"
+      );
+      return jsonResponse({
+        page: 1,
+        page_count: 1,
+        routine_folders: [
+          {
+            id: 7,
+            title: "Push Pull Legs",
+            index: 0,
+            created_at: "2026-08-01T00:00:00Z",
+            updated_at: "2026-08-01T00:00:00Z",
+          },
+          {
+            id: 9,
+            title: "外部エージェント作成",
+            index: 1,
+            created_at: "2026-08-02T00:00:00Z",
+            updated_at: "2026-08-02T00:00:00Z",
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await listRoutineFolders();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([
+      { id: 7, title: "Push Pull Legs", index: 0 },
+      { id: 9, title: "外部エージェント作成", index: 1 },
+    ]);
+  });
+
+  it("walks every page and merges results", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("page=1")) {
+        return jsonResponse({
+          page: 1,
+          page_count: 2,
+          routine_folders: [{ id: 1, title: "A", index: 0 }],
+        });
+      }
+      expect(url).toContain("page=2");
+      return jsonResponse({
+        page: 2,
+        page_count: 2,
+        routine_folders: [{ id: 2, title: "B", index: 1 }],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await listRoutineFolders();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.map((f) => f.id)).toEqual([1, 2]);
+  });
+
+  it("returns an empty array when the account has no folders", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ page: 1, page_count: 1, routine_folders: [] })
+      )
+    );
+
+    expect(await listRoutineFolders()).toEqual([]);
   });
 });
 

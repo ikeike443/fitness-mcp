@@ -98,7 +98,7 @@ test("rejects requests with the wrong bearer token", async () => {
   assert.equal(res.status, 401);
 });
 
-test("lists all 10 tools with a valid bearer token", async () => {
+test("lists all 11 tools with a valid bearer token", async () => {
   const res = await fetch(`${BASE_URL}/api/mcp`, {
     method: "POST",
     headers: {
@@ -125,6 +125,7 @@ test("lists all 10 tools with a valid bearer token", async () => {
     "get_recent_workouts",
     "get_weight_trend",
     "get_workout_detail",
+    "list_routine_folders",
     "search_exercise_templates",
     "update_routine",
   ]);

@@ -64,7 +64,7 @@ describe("POST /api/mcp auth", () => {
 });
 
 describe("POST /api/mcp tools/list", () => {
-  it("lists all 10 tools", async () => {
+  it("lists all 11 tools", async () => {
     const { json } = await callMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, AUTH_HEADER);
     const names = json.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual([
@@ -76,6 +76,7 @@ describe("POST /api/mcp tools/list", () => {
       "get_recent_workouts",
       "get_weight_trend",
       "get_workout_detail",
+      "list_routine_folders",
       "search_exercise_templates",
       "update_routine",
     ]);
@@ -364,6 +365,39 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     const routine = JSON.parse(json.result.content[0].text);
     expect(routine.id).toBe("routine-1");
     expect(routine.title).toBe("Tuesday: Back & Legs (v2)");
+  });
+
+  it("list_routine_folders GETs and returns id/title/index, no confirm required", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe(
+        "https://api.hevyapp.com/v1/routine_folders?page=1&pageSize=10"
+      );
+      return new Response(
+        JSON.stringify({
+          page: 1,
+          page_count: 1,
+          routine_folders: [
+            { id: 7, title: "週3回メニュー", index: 0, created_at: "x", updated_at: "x" },
+          ],
+        }),
+        { status: 200 }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 15,
+        method: "tools/call",
+        params: { name: "list_routine_folders", arguments: {} },
+      },
+      AUTH_HEADER
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const folders = JSON.parse(json.result.content[0].text);
+    expect(folders).toEqual([{ id: 7, title: "週3回メニュー", index: 0 }]);
   });
 
   it("create_routine_folder is rejected before touching the Hevy API when confirm is not true", async () => {

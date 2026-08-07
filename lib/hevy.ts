@@ -326,6 +326,39 @@ export async function updateRoutine(
   return toRoutineOutput(unwrapRoutineResponse(data));
 }
 
+interface HevyRoutineFoldersResponse {
+  page: number;
+  page_count: number;
+  routine_folders: HevyRoutineFolder[];
+}
+
+// GET /v1/routine_folders is paginated (max pageSize 10, confirmed against
+// swrm-io/go-hevy's RoutineFoldersService.List) and wraps its response as
+// { page, page_count, routine_folders: [...] } — the same shape as
+// /v1/workouts and /v1/body_measurements above, and unlike the single-folder
+// GET /v1/routine_folders/{id} (unwrapped) or the POST response (wrapped
+// under "routine_folder", singular — see createRoutineFolder). Folder counts
+// are expected to be small, so this walks every page (capped, as a safety
+// net) rather than exposing pagination to the caller — the point of this
+// tool is letting Claude search *all* folders by title to resolve a
+// `folderId`, so a partial first-page-only result would silently break that.
+const ROUTINE_FOLDER_PAGE_SIZE = 10;
+const ROUTINE_FOLDER_PAGE_CAP = 20; // safety cap (~200 folders)
+
+export async function listRoutineFolders() {
+  const all: HevyRoutineFolder[] = [];
+  let page = 1;
+  while (page <= ROUTINE_FOLDER_PAGE_CAP) {
+    const data = await hevyFetch<HevyRoutineFoldersResponse>(
+      `/v1/routine_folders?page=${page}&pageSize=${ROUTINE_FOLDER_PAGE_SIZE}`
+    );
+    all.push(...data.routine_folders);
+    if (page >= data.page_count) break;
+    page++;
+  }
+  return all.map((f) => ({ id: f.id, title: f.title, index: f.index }));
+}
+
 export async function createRoutineFolder(title: string) {
   // POST /v1/routine_folders wraps its response as { routine_folder: {...} }
   // (unlike GET /v1/routine_folders/{id}, which returns it unwrapped). This
