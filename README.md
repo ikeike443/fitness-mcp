@@ -41,16 +41,16 @@ This app authenticates as **your own Google account** via OAuth — not a servic
 
 1. Create or select a Google Cloud project.
 2. Enable the **Google Drive API** and **Google Sheets API** for it.
-3. Create an **OAuth 2.0 Client ID** (APIs & Services → Credentials → Create Credentials → OAuth client ID) of type **Desktop app**.
-4. Add `http://localhost:8877` as an authorized redirect URI for it.
-5. Note the generated Client ID and Client Secret.
+3. Create an **OAuth 2.0 Client ID** (APIs & Services → Credentials → Create Credentials → OAuth client ID) of type **Desktop app**. Desktop-app clients don't have an "Authorized redirect URIs" field in the console at all (only Web-application-type clients do) — Google accepts a loopback redirect like `http://localhost:8877` from a Desktop client automatically, with nothing to pre-register.
+4. Note the generated Client ID and Client Secret.
+5. **Publish the OAuth consent screen to Production**: APIs & Services → OAuth consent screen → Publish App. This matters because while the consent screen stays in the default **Testing** status, Google issues refresh tokens for sensitive/restricted scopes (like `drive`) that silently **expire after 7 days** — the exact failure this project is meant to avoid would come back every week as `invalid_grant`. For a single-user personal app like this, moving to Production does *not* require Google's full verification review; you'll just see (and have to click through) an "unverified app" warning once during the consent flow below, since `drive` is a restricted scope.
 6. Run the included helper script once, locally (not on Vercel), to get a refresh token:
    ```bash
    GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... \
      node scripts/get-google-refresh-token.mjs
    ```
-   It prints a URL — open it, sign in with the Google account that owns "Health data", and approve. The script then prints a refresh token.
-7. Set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and `GOOGLE_OAUTH_REFRESH_TOKEN` (see below) — the refresh token doesn't expire on its own, so this is a one-time setup.
+   It prints a URL — open it, sign in with the Google account that owns "Health data", click through the "unverified app" warning, and approve. The script then prints a refresh token.
+7. Set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and `GOOGLE_OAUTH_REFRESH_TOKEN` (see below) — with the consent screen published to Production (step 5), the refresh token doesn't expire on its own, so this is a one-time setup.
 
 ## Authentication
 
