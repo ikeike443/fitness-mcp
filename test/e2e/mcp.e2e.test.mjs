@@ -2,7 +2,8 @@
 // HTTP. Requires `npm run build` to have been run first.
 //
 // This intentionally does NOT exercise real Hevy/MacroFactor data — CI has no
-// real HEVY_API_KEY or GOOGLE_SERVICE_ACCOUNT_KEY_BASE64 (this repo may be
+// real HEVY_API_KEY or Google OAuth credentials (GOOGLE_OAUTH_CLIENT_ID /
+// GOOGLE_OAUTH_CLIENT_SECRET / GOOGLE_OAUTH_REFRESH_TOKEN — this repo may be
 // public), so it only verifies the protocol-level surface: the server boots,
 // serves the health-check page, enforces bearer auth, and lists all tools.
 import { test, before, after } from "node:test";

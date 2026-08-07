@@ -1,22 +1,40 @@
 import { Readable } from "node:stream";
 import { google, type drive_v3, type sheets_v4 } from "googleapis";
 
-const SCOPES = ["https://www.googleapis.com/auth/drive"];
+/**
+ * Auth: OAuth 2.0 with a stored refresh token for the user's own Google
+ * account — NOT a service account.
+ *
+ * A service account was tried first and doesn't work here: on a personal
+ * (non-Workspace) Gmail account, service accounts have zero storage quota
+ * of their own, so Drive rejects `files.create` (and, in some cases,
+ * `files.update`) with "Service Accounts do not have storage quota" even
+ * when the target folder is shared with them as Editor. Shared Drives
+ * (which sidestep this) and domain-wide delegation are both
+ * Workspace-only, unavailable here. Authenticating as the real account via
+ * OAuth avoids the problem entirely — every file this app touches is
+ * simply owned by the user, same as if they'd created it by hand — and as
+ * a bonus, no folder-sharing step is needed since the app acts as the
+ * account that already owns "Health data".
+ */
 
-let cachedAuth: InstanceType<typeof google.auth.JWT> | null = null;
+let cachedAuth: InstanceType<typeof google.auth.OAuth2> | null = null;
 
 function getAuthClient() {
   if (cachedAuth) return cachedAuth;
 
-  const b64 = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_BASE64;
-  if (!b64) throw new Error("GOOGLE_SERVICE_ACCOUNT_KEY_BASE64 is not set");
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error(
+      "GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_OAUTH_REFRESH_TOKEN must all be set"
+    );
+  }
 
-  const creds = JSON.parse(Buffer.from(b64, "base64").toString("utf-8"));
-  cachedAuth = new google.auth.JWT({
-    email: creds.client_email,
-    key: creds.private_key,
-    scopes: SCOPES,
-  });
+  const client = new google.auth.OAuth2(clientId, clientSecret);
+  client.setCredentials({ refresh_token: refreshToken });
+  cachedAuth = client;
   return cachedAuth;
 }
 
