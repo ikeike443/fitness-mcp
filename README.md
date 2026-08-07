@@ -59,7 +59,8 @@ There's no login screen and no client database — `/authorize` auto-approves. T
 ```bash
 derive() {
   if [ -z "$MASTER_PASSPHRASE" ]; then
-    read -rsp "Master passphrase: " MASTER_PASSPHRASE
+    printf "Master passphrase: "
+    read -rs MASTER_PASSPHRASE
     echo
   fi
   echo -n "$1" | openssl dgst -sha256 -hmac "$MASTER_PASSPHRASE" -hex | awk '{print $2}'
