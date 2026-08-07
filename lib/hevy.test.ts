@@ -237,7 +237,7 @@ describe("createRoutine", () => {
 });
 
 describe("updateRoutine", () => {
-  it("PUTs to /v1/routines/{routineId} with the same body shape as createRoutine", async () => {
+  it("PUTs to /v1/routines/{routineId} with the correct URL and method", async () => {
     const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
       expect(url).toBe("https://api.hevyapp.com/v1/routines/routine-1");
       expect(init.method).toBe("PUT");
@@ -247,6 +247,31 @@ describe("updateRoutine", () => {
 
     const result = await updateRoutine("routine-1", baseInput);
     expect(result.id).toBe("routine-1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression test for a real Hevy 400 ("Unrecognized key(s) in object:
+  // 'folder_id'") reported against update_routine: unlike POST /v1/routines,
+  // PUT /v1/routines/{id} has no folder_id field in its schema at all —
+  // sending the key (even as null) is rejected outright. createRoutine
+  // still sends folder_id (see the "defaults omitted optional fields to
+  // null" test above); updateRoutine must never send it.
+  it("never includes a folder_id key in the PUT body, even though createRoutine sends one", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      expect(body.routine).not.toHaveProperty("folder_id");
+      expect(Object.keys(body.routine).sort()).toEqual(
+        ["exercises", "notes", "title"]
+      );
+      return jsonResponse(routineApiResponse, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateRoutine("routine-1", {
+      title: baseInput.title,
+      notes: baseInput.notes,
+      exercises: baseInput.exercises,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

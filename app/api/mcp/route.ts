@@ -73,20 +73,26 @@ const routineExerciseSchema = z.object({
 
 const routineBodySchema = {
   title: z.string().min(1).describe("Routine title as it will appear in Hevy"),
-  folderId: z
-    .number()
-    .int()
-    .nullable()
-    .optional()
-    .describe(
-      "Routine folder ID to file this under, or null/omit for none — call list_routine_folders first to find an existing folder by title, or create_routine_folder to make a new one"
-    ),
   notes: notesSchema.describe('Routine-level notes. Must not contain "@".'),
   exercises: z
     .array(routineExerciseSchema)
     .min(1)
     .describe("Ordered list of exercises making up this routine"),
 };
+
+// Hevy's create-routine endpoint accepts folder_id; its update-routine
+// endpoint has no such field at all — a routine's folder can only be set at
+// creation, and Hevy 400s if folder_id is sent on an update, even as null
+// (see lib/hevy.ts UpdateRoutineInput for details). So folderId is only
+// part of create_routine's schema, not update_routine's.
+const folderIdSchema = z
+  .number()
+  .int()
+  .nullable()
+  .optional()
+  .describe(
+    "Routine folder ID to file this under, or null/omit for none — call list_routine_folders first to find an existing folder by title, or create_routine_folder to make a new one"
+  );
 
 const confirmSchema = z
   .literal(true)
@@ -304,6 +310,7 @@ const handler = createMcpHandler(
           "Create a new workout routine (template) in the user's Hevy account. THIS IS A REAL WRITE to the user's Hevy data. Before calling this tool, show the user the full planned routine (title, exercises, sets, reps, weights) in chat and get their explicit go-ahead — do not call it speculatively or as an intermediate step. Every exerciseTemplateId must come from a prior search_exercise_templates call; never guess one. Calling this tool twice with the same routine creates two separate duplicate routines (no automatic dedup) — if you're revising a routine created earlier in this conversation, call update_routine with its id instead of creating a new one.",
         inputSchema: z.object({
           ...routineBodySchema,
+          folderId: folderIdSchema,
           confirm: confirmSchema,
         }),
       },
@@ -320,7 +327,7 @@ const handler = createMcpHandler(
       {
         title: "Update a Hevy routine",
         description:
-          "Replace an existing Hevy routine's title/notes/exercises entirely (full overwrite, not a partial patch — omitted exercises are removed). THIS IS A REAL WRITE. Show the user the complete new routine content and get explicit confirmation before calling. Prefer this over create_routine whenever you're revising a routine that already exists, to avoid accumulating duplicates.",
+          "Replace an existing Hevy routine's title/notes/exercises entirely (full overwrite, not a partial patch — omitted exercises are removed). THIS IS A REAL WRITE. Show the user the complete new routine content and get explicit confirmation before calling. Prefer this over create_routine whenever you're revising a routine that already exists, to avoid accumulating duplicates. Note: Hevy's update endpoint cannot change which folder a routine is filed under — folder assignment is set only at creation (create_routine's folderId); to move an existing routine to a different folder, recreate it there.",
         inputSchema: z.object({
           routineId: z
             .string()
@@ -332,8 +339,8 @@ const handler = createMcpHandler(
           confirm: confirmSchema,
         }),
       },
-      async ({ routineId, title, folderId, notes, exercises }) => {
-        const routine = await updateRoutine(routineId, { title, folderId, notes, exercises });
+      async ({ routineId, title, notes, exercises }) => {
+        const routine = await updateRoutine(routineId, { title, notes, exercises });
         return {
           content: [{ type: "text", text: JSON.stringify(routine, null, 2) }],
         };
@@ -345,7 +352,7 @@ const handler = createMcpHandler(
       {
         title: "List Hevy routine folders",
         description:
-          "List all existing routine folders in the user's Hevy account (id, title, display index). Call this before create_routine/update_routine when the user names a folder by title (e.g. \"put it in my 'Push Pull Legs' folder\") so you can resolve the folderId yourself instead of asking the user for it. If no folder title matches, confirm with the user before falling back to create_routine_folder.",
+          "List all existing routine folders in the user's Hevy account (id, title, display index). Call this before create_routine when the user names a folder by title (e.g. \"put it in my 'Push Pull Legs' folder\") so you can resolve the folderId yourself instead of asking the user for it. If no folder title matches, confirm with the user before falling back to create_routine_folder.",
         inputSchema: z.object({}),
       },
       async () => {
@@ -361,7 +368,7 @@ const handler = createMcpHandler(
       {
         title: "Create a Hevy routine folder",
         description:
-          "Create a new folder in the user's Hevy account to organize routines (e.g. by program or training day). THIS IS A REAL WRITE. Confirm the folder name with the user before calling. Returns the folder's id, which can be passed as folderId to create_routine/update_routine. Call list_routine_folders first to check whether a suitable folder already exists.",
+          "Create a new folder in the user's Hevy account to organize routines (e.g. by program or training day). THIS IS A REAL WRITE. Confirm the folder name with the user before calling. Returns the folder's id, which can be passed as folderId to create_routine (update_routine has no folderId — Hevy cannot change a routine's folder after creation). Call list_routine_folders first to check whether a suitable folder already exists.",
         inputSchema: z.object({
           title: z.string().min(1).describe("Folder name as it will appear in Hevy"),
           confirm: confirmSchema,
