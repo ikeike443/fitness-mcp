@@ -22,7 +22,7 @@ A personal remote MCP (Model Context Protocol) server that lets Claude read your
 | `get_body_measurements` | read | Recent Hevy body measurement entries (weight, body fat %) |
 | `search_exercise_templates` | read | Search Hevy's exercise library by name to resolve the `exercise_template_id` needed by `create_routine`/`update_routine` |
 | `create_routine` | write | Create a new Hevy routine (workout plan template) |
-| `update_routine` | write | Replace an existing Hevy routine's title/notes/exercises entirely |
+| `update_routine` | write | Replace an existing Hevy routine's title/notes/exercises entirely (folder assignment cannot be changed via update — see below) |
 | `list_routine_folders` | read | List existing routine folders (id, title, index) to resolve a `folderId` by name |
 | `create_routine_folder` | write | Create a folder to organize routines |
 | `get_daily_macros` | read | Daily calories/protein/carbs/fat/steps from MacroFactor exports |
@@ -132,7 +132,7 @@ CI never touches real Hevy data, so the routine-write tools (`create_routine`, `
 3. Call `create_routine` with an obviously-throwaway title (e.g. `"fitness-mcp manual test — delete me"`) and `confirm: true`, and note the returned `id`.
 4. Open the Hevy app or web app and visually confirm the routine was created with the expected exercises, sets, reps, and weights.
 5. Check whether the returned `webUrl` (`https://hevy.com/routines/{id}`) actually opens the routine — it's an unverified best-effort guess at Hevy's URL pattern, not a documented API field. If it doesn't resolve, that's worth a follow-up to remove or fix the field.
-6. Optionally call `update_routine` against the same `id` to verify the overwrite path, and `create_routine_folder` followed by `create_routine` with its returned `folderId` to verify folder filing. Call `list_routine_folders` afterward and confirm the newly created folder shows up with a matching `id`/`title`.
+6. Optionally call `update_routine` against the same `id` to verify the overwrite path (note it has no `folderId` parameter — Hevy's update endpoint has no `folder_id` field at all, and sending one, even `null`, 400s, so a routine's folder can only be set at creation), and `create_routine_folder` followed by `create_routine` with its returned `folderId` to verify folder filing. Call `list_routine_folders` afterward and confirm the newly created folder shows up with a matching `id`/`title`.
 7. **Delete the test routine manually in the Hevy app.** Hevy's public API has no documented `DELETE /v1/routines` endpoint, so this server cannot clean up after itself — there is intentionally no `delete_routine` tool.
 8. Never commit a real `HEVY_API_KEY`, and never run this check in CI.
 

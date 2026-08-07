@@ -232,40 +232,65 @@ export interface CreateRoutineInput {
   exercises: RoutineExerciseInput[];
 }
 
-export type UpdateRoutineInput = CreateRoutineInput;
+// Hevy's PUT /v1/routines/{id} schema has no folder_id field at all — unlike
+// POST /v1/routines, which requires one. Sending "folder_id" (even explicit
+// null) on an update is rejected outright with
+// `Unrecognized key(s) in object: 'folder_id'`, confirmed against a real
+// Hevy account (see bug report: create_routine succeeds with folder_id:
+// null, update_routine 400s on the exact same key). A routine's folder can
+// only be set at creation time; there is no supported way to move an
+// existing routine between folders via this endpoint. So UpdateRoutineInput
+// intentionally has no folderId field — it is not a partial-input quirk,
+// it reflects a real capability gap in Hevy's API.
+export interface UpdateRoutineInput {
+  title: string;
+  notes?: string | null;
+  exercises: RoutineExerciseInput[];
+}
 
-// Builds the request body by picking exactly the writable fields by name —
-// never spreading caller input — so read-only fields (id, created_at, etc.)
-// can never leak into a request body even if a caller passes extra
-// properties via a loosely-typed object.
-function toHevyRoutineBody(input: CreateRoutineInput) {
+// Builds the routine.exercises/title/notes fields shared by create and
+// update, by picking exactly the writable fields by name — never spreading
+// caller input — so read-only fields (id, created_at, etc.) can never leak
+// into a request body even if a caller passes extra properties via a
+// loosely-typed object.
+function buildRoutineFields(input: UpdateRoutineInput) {
   assertValidNotes(input.notes ?? null);
   return {
+    title: input.title,
+    notes: input.notes ?? null,
+    exercises: input.exercises.map((e) => {
+      assertValidNotes(e.notes ?? null);
+      return {
+        exercise_template_id: e.exerciseTemplateId,
+        superset_id: e.supersetId ?? null,
+        rest_seconds: e.restSeconds ?? null,
+        notes: e.notes ?? null,
+        sets: e.sets.map((s) => {
+          assertValidSetType(s.type);
+          return {
+            type: s.type,
+            weight_kg: s.weightKg ?? null,
+            reps: s.reps ?? null,
+            distance_meters: s.distanceMeters ?? null,
+            duration_seconds: s.durationSeconds ?? null,
+          };
+        }),
+      };
+    }),
+  };
+}
+
+function toCreateRoutineBody(input: CreateRoutineInput) {
+  return {
     routine: {
-      title: input.title,
+      ...buildRoutineFields(input),
       folder_id: input.folderId ?? null,
-      notes: input.notes ?? null,
-      exercises: input.exercises.map((e) => {
-        assertValidNotes(e.notes ?? null);
-        return {
-          exercise_template_id: e.exerciseTemplateId,
-          superset_id: e.supersetId ?? null,
-          rest_seconds: e.restSeconds ?? null,
-          notes: e.notes ?? null,
-          sets: e.sets.map((s) => {
-            assertValidSetType(s.type);
-            return {
-              type: s.type,
-              weight_kg: s.weightKg ?? null,
-              reps: s.reps ?? null,
-              distance_meters: s.distanceMeters ?? null,
-              duration_seconds: s.durationSeconds ?? null,
-            };
-          }),
-        };
-      }),
     },
   };
+}
+
+function toUpdateRoutineBody(input: UpdateRoutineInput) {
+  return { routine: buildRoutineFields(input) };
 }
 
 function toRoutineOutput(r: HevyRoutine) {
@@ -307,7 +332,7 @@ function unwrapRoutineResponse(data: unknown): HevyRoutine {
 export async function createRoutine(input: CreateRoutineInput) {
   const data = await hevyFetch<unknown>("/v1/routines", {
     method: "POST",
-    body: toHevyRoutineBody(input),
+    body: toCreateRoutineBody(input),
   });
   return toRoutineOutput(unwrapRoutineResponse(data));
 }
@@ -320,7 +345,7 @@ export async function updateRoutine(
     `/v1/routines/${encodeURIComponent(routineId)}`,
     {
       method: "PUT",
-      body: toHevyRoutineBody(input),
+      body: toUpdateRoutineBody(input),
     }
   );
   return toRoutineOutput(unwrapRoutineResponse(data));
