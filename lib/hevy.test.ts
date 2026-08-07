@@ -237,7 +237,7 @@ describe("createRoutine", () => {
 });
 
 describe("updateRoutine", () => {
-  it("PUTs to /v1/routines/{routineId} with title/notes/exercises but no folder_id key", async () => {
+  it("PUTs to /v1/routines/{routineId} with the correct URL and method", async () => {
     const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
       expect(url).toBe("https://api.hevyapp.com/v1/routines/routine-1");
       expect(init.method).toBe("PUT");
