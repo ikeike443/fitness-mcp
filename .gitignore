@@ -37,6 +37,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Claude Code local tooling state (e.g. isolated subagent worktrees)
+.claude/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
