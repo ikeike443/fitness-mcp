@@ -9,6 +9,7 @@ import {
   createRoutine,
   updateRoutine,
   createRoutineFolder,
+  listRoutineFolders,
 } from "@/lib/hevy";
 import {
   getDailyMacros,
@@ -78,7 +79,7 @@ const routineBodySchema = {
     .nullable()
     .optional()
     .describe(
-      "Routine folder ID to file this under, or null/omit for none — see create_routine_folder"
+      "Routine folder ID to file this under, or null/omit for none — call list_routine_folders first to find an existing folder by title, or create_routine_folder to make a new one"
     ),
   notes: notesSchema.describe('Routine-level notes. Must not contain "@".'),
   exercises: z
@@ -340,11 +341,27 @@ const handler = createMcpHandler(
     );
 
     server.registerTool(
+      "list_routine_folders",
+      {
+        title: "List Hevy routine folders",
+        description:
+          "List all existing routine folders in the user's Hevy account (id, title, display index). Call this before create_routine/update_routine when the user names a folder by title (e.g. \"put it in my 'Push Pull Legs' folder\") so you can resolve the folderId yourself instead of asking the user for it. If no folder title matches, confirm with the user before falling back to create_routine_folder.",
+        inputSchema: z.object({}),
+      },
+      async () => {
+        const folders = await listRoutineFolders();
+        return {
+          content: [{ type: "text", text: JSON.stringify(folders, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
       "create_routine_folder",
       {
         title: "Create a Hevy routine folder",
         description:
-          "Create a new folder in the user's Hevy account to organize routines (e.g. by program or training day). THIS IS A REAL WRITE. Confirm the folder name with the user before calling. Returns the folder's id, which can be passed as folderId to create_routine/update_routine.",
+          "Create a new folder in the user's Hevy account to organize routines (e.g. by program or training day). THIS IS A REAL WRITE. Confirm the folder name with the user before calling. Returns the folder's id, which can be passed as folderId to create_routine/update_routine. Call list_routine_folders first to check whether a suitable folder already exists.",
         inputSchema: z.object({
           title: z.string().min(1).describe("Folder name as it will appear in Hevy"),
           confirm: confirmSchema,
