@@ -25,25 +25,32 @@ const baseInput: CreateRoutineInput = {
   ],
 };
 
+// Hevy's real POST/PUT /v1/routines response wraps the written routine as a
+// single-element array under "routine" — see the comment on
+// unwrapRoutineResponse in lib/hevy.ts for why.
 const routineApiResponse = {
-  id: "routine-1",
-  title: "Tuesday: Back & Legs",
-  folder_id: null,
-  notes: null,
-  exercises: [
+  routine: [
     {
-      exercise_template_id: "tmpl-deadlift",
-      superset_id: null,
-      rest_seconds: null,
+      id: "routine-1",
+      title: "Tuesday: Back & Legs",
+      folder_id: null,
       notes: null,
-      sets: [
-        { type: "warmup", weight_kg: 60, reps: 5, distance_meters: null, duration_seconds: null },
-        { type: "normal", weight_kg: 120, reps: 4, distance_meters: null, duration_seconds: null },
+      exercises: [
+        {
+          exercise_template_id: "tmpl-deadlift",
+          superset_id: null,
+          rest_seconds: null,
+          notes: null,
+          sets: [
+            { type: "warmup", weight_kg: 60, reps: 5, distance_meters: null, duration_seconds: null },
+            { type: "normal", weight_kg: 120, reps: 4, distance_meters: null, duration_seconds: null },
+          ],
+        },
       ],
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-01T00:00:00Z",
     },
   ],
-  created_at: "2026-08-01T00:00:00Z",
-  updated_at: "2026-08-01T00:00:00Z",
 };
 
 beforeEach(() => {
@@ -198,6 +205,30 @@ describe("createRoutine", () => {
 
     await expect(createRoutine(baseInput)).rejects.toThrow(/validation_error/);
   });
+
+  it("throws a clear diagnostic (not a TypeError) if Hevy ever returns an unwrapped routine", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(
+          { id: "routine-1", title: "x", folder_id: null, exercises: [] },
+          201
+        )
+      )
+    );
+
+    await expect(createRoutine(baseInput)).rejects.toThrow(
+      /Unexpected Hevy routine response shape/
+    );
+  });
+
+  it("throws a clear diagnostic if Hevy returns an empty routine array", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ routine: [] }, 201)));
+
+    await expect(createRoutine(baseInput)).rejects.toThrow(
+      /Unexpected Hevy routine response shape/
+    );
+  });
 });
 
 describe("updateRoutine", () => {
@@ -244,18 +275,33 @@ describe("createRoutineFolder", () => {
       expect(JSON.parse(init.body as string)).toEqual({
         routine_folder: { title: "Cut phase" },
       });
+      // Hevy's real response wraps the created folder under
+      // "routine_folder" — see the comment in lib/hevy.ts.
       return jsonResponse({
-        id: 42,
-        title: "Cut phase",
-        index: 0,
-        created_at: "2026-08-01T00:00:00Z",
-        updated_at: "2026-08-01T00:00:00Z",
+        routine_folder: {
+          id: 42,
+          title: "Cut phase",
+          index: 0,
+          created_at: "2026-08-01T00:00:00Z",
+          updated_at: "2026-08-01T00:00:00Z",
+        },
       });
     });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await createRoutineFolder("Cut phase");
     expect(result).toEqual({ id: 42, title: "Cut phase" });
+  });
+
+  it("throws a clear diagnostic if Hevy ever returns an unwrapped folder", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ id: 42, title: "Cut phase" }))
+    );
+
+    await expect(createRoutineFolder("Cut phase")).rejects.toThrow(
+      /Unexpected Hevy routine_folder response shape/
+    );
   });
 });
 

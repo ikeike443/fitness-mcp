@@ -281,33 +281,73 @@ function toRoutineOutput(r: HevyRoutine) {
   };
 }
 
+// Unlike GET /v1/routines/{id} (which wraps a single routine object as
+// { routine: {...} }), Hevy's POST /v1/routines and PUT /v1/routines/{id}
+// wrap the written routine as a *single-element array*: { routine: [{...}] }.
+// Previously this module assumed the response was an unwrapped HevyRoutine,
+// which meant `r.exercises` was always undefined and every create/update
+// call crashed with "Cannot read properties of undefined (reading 'length')"
+// in toRoutineOutput — *after* the write had already succeeded against Hevy,
+// so callers were told the write failed when it hadn't (see bug report:
+// routines were created despite every call erroring). Confirmed against a
+// third-party Hevy client's real request/response handling (swrm-io/go-hevy
+// RoutinesService.Create/Update), which unwraps the same way.
+function unwrapRoutineResponse(data: unknown): HevyRoutine {
+  const routines = (data as { routine?: unknown } | null)?.routine;
+  if (!Array.isArray(routines) || routines.length === 0) {
+    throw new Error(
+      `Unexpected Hevy routine response shape (expected { routine: [Routine] }): ${JSON.stringify(
+        data
+      )}`
+    );
+  }
+  return routines[0] as HevyRoutine;
+}
+
 export async function createRoutine(input: CreateRoutineInput) {
-  const routine = await hevyFetch<HevyRoutine>("/v1/routines", {
+  const data = await hevyFetch<unknown>("/v1/routines", {
     method: "POST",
     body: toHevyRoutineBody(input),
   });
-  return toRoutineOutput(routine);
+  return toRoutineOutput(unwrapRoutineResponse(data));
 }
 
 export async function updateRoutine(
   routineId: string,
   input: UpdateRoutineInput
 ) {
-  const routine = await hevyFetch<HevyRoutine>(
+  const data = await hevyFetch<unknown>(
     `/v1/routines/${encodeURIComponent(routineId)}`,
     {
       method: "PUT",
       body: toHevyRoutineBody(input),
     }
   );
-  return toRoutineOutput(routine);
+  return toRoutineOutput(unwrapRoutineResponse(data));
 }
 
 export async function createRoutineFolder(title: string) {
-  const folder = await hevyFetch<HevyRoutineFolder>("/v1/routine_folders", {
-    method: "POST",
-    body: { routine_folder: { title } },
-  });
+  // POST /v1/routine_folders wraps its response as { routine_folder: {...} }
+  // (unlike GET /v1/routine_folders/{id}, which returns it unwrapped). This
+  // was previously treated as unwrapped, so `folder.id`/`folder.title` were
+  // always undefined and JSON.stringify silently dropped them, producing an
+  // empty `{}` result (see bug report). Confirmed against swrm-io/go-hevy's
+  // RoutineFoldersService.Create, which unwraps the same key.
+  const data = await hevyFetch<{ routine_folder?: HevyRoutineFolder }>(
+    "/v1/routine_folders",
+    {
+      method: "POST",
+      body: { routine_folder: { title } },
+    }
+  );
+  const folder = data.routine_folder;
+  if (!folder) {
+    throw new Error(
+      `Unexpected Hevy routine_folder response shape (expected { routine_folder: RoutineFolder }): ${JSON.stringify(
+        data
+      )}`
+    );
+  }
   return { id: folder.id, title: folder.title };
 }
 

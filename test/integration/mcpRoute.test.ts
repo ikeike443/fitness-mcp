@@ -247,13 +247,17 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
         expect(init.method).toBe("POST");
         return new Response(
           JSON.stringify({
-            id: "routine-1",
-            title: "Tuesday: Back & Legs",
-            folder_id: null,
-            notes: null,
-            exercises: [],
-            created_at: "2026-08-01T00:00:00Z",
-            updated_at: "2026-08-01T00:00:00Z",
+            routine: [
+              {
+                id: "routine-1",
+                title: "Tuesday: Back & Legs",
+                folder_id: null,
+                notes: null,
+                exercises: [],
+                created_at: "2026-08-01T00:00:00Z",
+                updated_at: "2026-08-01T00:00:00Z",
+              },
+            ],
           }),
           { status: 201 }
         );
@@ -322,13 +326,17 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
         expect(init.method).toBe("PUT");
         return new Response(
           JSON.stringify({
-            id: "routine-1",
-            title: "Tuesday: Back & Legs (v2)",
-            folder_id: null,
-            notes: null,
-            exercises: [],
-            created_at: "2026-08-01T00:00:00Z",
-            updated_at: "2026-08-02T00:00:00Z",
+            routine: [
+              {
+                id: "routine-1",
+                title: "Tuesday: Back & Legs (v2)",
+                folder_id: null,
+                notes: null,
+                exercises: [],
+                created_at: "2026-08-01T00:00:00Z",
+                updated_at: "2026-08-02T00:00:00Z",
+              },
+            ],
           }),
           { status: 200 }
         );
@@ -389,11 +397,13 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
         expect(init.method).toBe("POST");
         return new Response(
           JSON.stringify({
-            id: 7,
-            title: "週3回メニュー",
-            index: 0,
-            created_at: "2026-08-01T00:00:00Z",
-            updated_at: "2026-08-01T00:00:00Z",
+            routine_folder: {
+              id: 7,
+              title: "週3回メニュー",
+              index: 0,
+              created_at: "2026-08-01T00:00:00Z",
+              updated_at: "2026-08-01T00:00:00Z",
+            },
           }),
           { status: 201 }
         );
@@ -427,11 +437,13 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
         if (url.endsWith("/v1/routine_folders")) {
           return new Response(
             JSON.stringify({
-              id: 99,
-              title: "週3回メニュー",
-              index: 0,
-              created_at: "2026-08-01T00:00:00Z",
-              updated_at: "2026-08-01T00:00:00Z",
+              routine_folder: {
+                id: 99,
+                title: "週3回メニュー",
+                index: 0,
+                created_at: "2026-08-01T00:00:00Z",
+                updated_at: "2026-08-01T00:00:00Z",
+              },
             }),
             { status: 201 }
           );
@@ -444,13 +456,17 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
           expect(body.routine.folder_id).toBe(99);
           return new Response(
             JSON.stringify({
-              id: `routine-${routineCreateCalls}`,
-              title: body.routine.title,
-              folder_id: body.routine.folder_id,
-              notes: null,
-              exercises: [],
-              created_at: "2026-08-01T00:00:00Z",
-              updated_at: "2026-08-01T00:00:00Z",
+              routine: [
+                {
+                  id: `routine-${routineCreateCalls}`,
+                  title: body.routine.title,
+                  folder_id: body.routine.folder_id,
+                  notes: null,
+                  exercises: [],
+                  created_at: "2026-08-01T00:00:00Z",
+                  updated_at: "2026-08-01T00:00:00Z",
+                },
+              ],
             }),
             { status: 201 }
           );
