@@ -54,12 +54,14 @@ There's no login screen and no client database — `/authorize` auto-approves. T
 
 ### Generating the three secrets from one memorable passphrase
 
-`MCP_BEARER_TOKEN`, `OAUTH_CLIENT_ID`, and `OAUTH_CLIENT_SECRET` can all be derived deterministically from a single master passphrase, so losing the stored values isn't a disaster — just re-derive them:
+`MCP_BEARER_TOKEN`, `OAUTH_CLIENT_ID`, and `OAUTH_CLIENT_SECRET` can all be derived deterministically from a single master passphrase, so losing the stored values isn't a disaster — just re-derive them. Paste this into a fresh terminal (it isn't installed anywhere permanent on purpose — see below) and it'll prompt for the passphrase once per session instead of making you type it into every command:
 
 ```bash
-export MASTER_PASSPHRASE="<your own long, random passphrase — e.g. openssl rand -base64 24>"
-
 derive() {
+  if [ -z "$MASTER_PASSPHRASE" ]; then
+    read -rsp "Master passphrase: " MASTER_PASSPHRASE
+    echo
+  fi
   echo -n "$1" | openssl dgst -sha256 -hmac "$MASTER_PASSPHRASE" -hex | awk '{print $2}'
 }
 
@@ -68,7 +70,9 @@ derive "fitness-mcp:oauth-client-id"     # → OAUTH_CLIENT_ID
 derive "fitness-mcp:oauth-client-secret" # → OAUTH_CLIENT_SECRET
 ```
 
-The label strings aren't secret (they're safe to keep in this README) — only `MASTER_PASSPHRASE` is. Running `derive` again with the same passphrase always reproduces the same values.
+The label strings aren't secret (they're safe to keep in this README) — only the passphrase is. Running `derive` again with the same passphrase always reproduces the same values.
+
+This is deliberately left as a copy-paste snippet rather than something installed into `~/.bashrc`: putting the function alone in a shell rc file is fine, but putting `export MASTER_PASSPHRASE=...` there too means the passphrase sits in plaintext on disk indefinitely — a tradeoff we're choosing not to make by default. If you don't mind that tradeoff on your own machine, adding both to `~/.bashrc` works and skips the per-session prompt entirely.
 
 ## Local development
 
