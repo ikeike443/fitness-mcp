@@ -64,16 +64,20 @@ describe("POST /api/mcp auth", () => {
 });
 
 describe("POST /api/mcp tools/list", () => {
-  it("lists all 6 tools", async () => {
+  it("lists all 10 tools", async () => {
     const { json } = await callMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, AUTH_HEADER);
     const names = json.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual([
+      "create_routine",
+      "create_routine_folder",
       "get_body_measurements",
       "get_daily_macros",
       "get_nutrition_trends",
       "get_recent_workouts",
       "get_weight_trend",
       "get_workout_detail",
+      "search_exercise_templates",
+      "update_routine",
     ]);
   });
 });
@@ -140,6 +144,367 @@ describe("POST /api/mcp tools/call — Hevy (real lib/hevy.ts, fetch mocked)", (
     // result payload, not as an HTTP error.
     expect(status).toBe(200);
     expect(json.result.isError).toBe(true);
+  });
+});
+
+describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mocked)", () => {
+  // lib/hevy.ts caches exercise_templates pages in module-level state (by
+  // design — see lib/hevy.ts), and this test file's real route.ts import
+  // means that module instance is shared across every test below. All
+  // mocked exercise_templates responses in this describe block therefore
+  // return this same catalog, so whichever test populates the cache first,
+  // later searches in other tests still find what they're looking for.
+  const EXERCISE_CATALOG = [
+    {
+      id: "tmpl-bench",
+      title: "Bench Press (Barbell)",
+      type: "weight_reps",
+      primary_muscle_group: "chest",
+      secondary_muscle_groups: [],
+      equipment: "barbell",
+      is_custom: false,
+    },
+    {
+      id: "tmpl-deadlift",
+      title: "Deadlift (Barbell)",
+      type: "weight_reps",
+      primary_muscle_group: "back",
+      secondary_muscle_groups: [],
+      equipment: "barbell",
+      is_custom: false,
+    },
+    {
+      id: "tmpl-legpress",
+      title: "Leg Press (Machine)",
+      type: "weight_reps",
+      primary_muscle_group: "legs",
+      secondary_muscle_groups: [],
+      equipment: "machine",
+      is_custom: false,
+    },
+  ];
+
+  function exerciseTemplatesResponse() {
+    return new Response(
+      JSON.stringify({ page: 1, page_count: 1, exercise_templates: EXERCISE_CATALOG }),
+      { status: 200 }
+    );
+  }
+
+  it("search_exercise_templates returns candidates from the Hevy API", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toContain("api.hevyapp.com/v1/exercise_templates");
+        return exerciseTemplatesResponse();
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 10,
+        method: "tools/call",
+        params: { name: "search_exercise_templates", arguments: { query: "bench" } },
+      },
+      AUTH_HEADER
+    );
+
+    const results = JSON.parse(json.result.content[0].text);
+    expect(results).toEqual([
+      { id: "tmpl-bench", title: "Bench Press (Barbell)", muscleGroup: "chest", equipment: "barbell" },
+    ]);
+  });
+
+  it("create_routine is rejected before touching the Hevy API when confirm is not true", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { status, json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 11,
+        method: "tools/call",
+        params: {
+          name: "create_routine",
+          arguments: {
+            title: "Tuesday: Back & Legs",
+            exercises: [{ exerciseTemplateId: "tmpl-deadlift", sets: [{ type: "normal", reps: 5 }] }],
+          },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    expect(status).toBe(200);
+    expect(json.result.isError).toBe(true);
+    expect(json.result.content[0].text).toMatch(/confirm/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("create_routine POSTs the routine to Hevy and returns its id when confirmed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/routines");
+        expect(init.method).toBe("POST");
+        return new Response(
+          JSON.stringify({
+            id: "routine-1",
+            title: "Tuesday: Back & Legs",
+            folder_id: null,
+            notes: null,
+            exercises: [],
+            created_at: "2026-08-01T00:00:00Z",
+            updated_at: "2026-08-01T00:00:00Z",
+          }),
+          { status: 201 }
+        );
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 12,
+        method: "tools/call",
+        params: {
+          name: "create_routine",
+          arguments: {
+            title: "Tuesday: Back & Legs",
+            exercises: [{ exerciseTemplateId: "tmpl-deadlift", sets: [{ type: "normal", reps: 5 }] }],
+            confirm: true,
+          },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const routine = JSON.parse(json.result.content[0].text);
+    expect(routine).toEqual({
+      id: "routine-1",
+      title: "Tuesday: Back & Legs",
+      folderId: null,
+      exerciseCount: 0,
+      webUrl: "https://hevy.com/routines/routine-1",
+    });
+  });
+
+  it("update_routine PUTs to the routine's id when confirmed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/routines/routine-1");
+        expect(init.method).toBe("PUT");
+        return new Response(
+          JSON.stringify({
+            id: "routine-1",
+            title: "Tuesday: Back & Legs (v2)",
+            folder_id: null,
+            notes: null,
+            exercises: [],
+            created_at: "2026-08-01T00:00:00Z",
+            updated_at: "2026-08-02T00:00:00Z",
+          }),
+          { status: 200 }
+        );
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 13,
+        method: "tools/call",
+        params: {
+          name: "update_routine",
+          arguments: {
+            routineId: "routine-1",
+            title: "Tuesday: Back & Legs (v2)",
+            exercises: [{ exerciseTemplateId: "tmpl-deadlift", sets: [{ type: "normal", reps: 4 }] }],
+            confirm: true,
+          },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const routine = JSON.parse(json.result.content[0].text);
+    expect(routine.id).toBe("routine-1");
+    expect(routine.title).toBe("Tuesday: Back & Legs (v2)");
+  });
+
+  it("create_routine_folder POSTs the folder and returns its id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/routine_folders");
+        expect(init.method).toBe("POST");
+        return new Response(
+          JSON.stringify({
+            routine_folder: {
+              id: 7,
+              title: "週3回メニュー",
+              index: 0,
+              created_at: "2026-08-01T00:00:00Z",
+              updated_at: "2026-08-01T00:00:00Z",
+            },
+          }),
+          { status: 201 }
+        );
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 14,
+        method: "tools/call",
+        params: { name: "create_routine_folder", arguments: { title: "週3回メニュー", confirm: true } },
+      },
+      AUTH_HEADER
+    );
+
+    const folder = JSON.parse(json.result.content[0].text);
+    expect(folder).toEqual({ id: 7, title: "週3回メニュー" });
+  });
+
+  it("builds a full 3-day/week program: folder + search + create_routine x3", async () => {
+    // Mirrors the real menu from the feature proposal: Tue (back/legs),
+    // Thu (chest/shoulders/triceps), Sat (legs/shoulders/biceps/abs).
+    let routineCreateCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes("/v1/exercise_templates")) {
+          return exerciseTemplatesResponse();
+        }
+        if (url.endsWith("/v1/routine_folders")) {
+          return new Response(
+            JSON.stringify({
+              routine_folder: {
+                id: 99,
+                title: "週3回メニュー",
+                index: 0,
+                created_at: "2026-08-01T00:00:00Z",
+                updated_at: "2026-08-01T00:00:00Z",
+              },
+            }),
+            { status: 201 }
+          );
+        }
+        if (url.endsWith("/v1/routines")) {
+          routineCreateCalls += 1;
+          const body = JSON.parse((init!.body as string)) as {
+            routine: { title: string; folder_id: number | null };
+          };
+          expect(body.routine.folder_id).toBe(99);
+          return new Response(
+            JSON.stringify({
+              id: `routine-${routineCreateCalls}`,
+              title: body.routine.title,
+              folder_id: body.routine.folder_id,
+              notes: null,
+              exercises: [],
+              created_at: "2026-08-01T00:00:00Z",
+              updated_at: "2026-08-01T00:00:00Z",
+            }),
+            { status: 201 }
+          );
+        }
+        throw new Error(`unexpected fetch to ${url}`);
+      })
+    );
+
+    // 1. Resolve exercise_template_ids via search.
+    const { json: searchJson } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 20,
+        method: "tools/call",
+        params: { name: "search_exercise_templates", arguments: { query: "deadlift" } },
+      },
+      AUTH_HEADER
+    );
+    const deadlift = JSON.parse(searchJson.result.content[0].text)[0];
+    expect(deadlift.id).toBe("tmpl-deadlift");
+
+    // 2. Create a folder to group the 3 days.
+    const { json: folderJson } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 21,
+        method: "tools/call",
+        params: { name: "create_routine_folder", arguments: { title: "週3回メニュー", confirm: true } },
+      },
+      AUTH_HEADER
+    );
+    const folder = JSON.parse(folderJson.result.content[0].text);
+    expect(folder.id).toBe(99);
+
+    // 3. Create the three day-routines under that folder.
+    const days = [
+      {
+        title: "火曜：背中・脚",
+        exercises: [
+          {
+            exerciseTemplateId: deadlift.id,
+            sets: [
+              { type: "warmup", reps: 5 },
+              { type: "normal", reps: 4 },
+              { type: "normal", reps: 4 },
+              { type: "normal", reps: 3 },
+            ],
+          },
+        ],
+      },
+      {
+        title: "木曜：胸・肩・三頭",
+        exercises: [
+          {
+            exerciseTemplateId: "tmpl-bench",
+            sets: [
+              { type: "warmup", reps: 5 },
+              { type: "normal", reps: 5 },
+              { type: "normal", reps: 5 },
+            ],
+          },
+        ],
+      },
+      {
+        title: "土曜：脚・肩・二頭・腹筋",
+        exercises: [
+          {
+            exerciseTemplateId: "tmpl-legpress",
+            sets: [
+              { type: "normal", reps: 9 },
+              { type: "normal", reps: 9 },
+              { type: "normal", reps: 9 },
+            ],
+          },
+        ],
+      },
+    ];
+
+    for (const [i, day] of days.entries()) {
+      const { json } = await callMcp(
+        {
+          jsonrpc: "2.0",
+          id: 22 + i,
+          method: "tools/call",
+          params: {
+            name: "create_routine",
+            arguments: { ...day, folderId: folder.id, confirm: true },
+          },
+        },
+        AUTH_HEADER
+      );
+      const routine = JSON.parse(json.result.content[0].text);
+      expect(routine.title).toBe(day.title);
+      expect(routine.folderId).toBe(99);
+    }
+
+    expect(routineCreateCalls).toBe(3);
   });
 });
 
