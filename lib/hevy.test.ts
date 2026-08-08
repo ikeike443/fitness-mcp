@@ -448,6 +448,42 @@ describe("getRoutineDetail", () => {
     const result = await getRoutineDetail("routine-1");
     expect(result.exercises[0].supersetId).toBe(2);
   });
+
+  it("prefers an explicitly-present superset_id: null over a simultaneous supersets_id value", async () => {
+    // Regression guard: `superset_id: null` means "explicitly no superset",
+    // which must win even if a stray `supersets_id` key with a real value is
+    // also present. A naive `e.superset_id ?? e.supersets_id ?? null` would
+    // incorrectly fall through to 2 here since `??` treats explicit null the
+    // same as the key being absent.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          routine: {
+            id: "routine-1",
+            title: "x",
+            folder_id: null,
+            notes: null,
+            exercises: [
+              {
+                exercise_template_id: "tmpl-bench",
+                superset_id: null,
+                supersets_id: 2,
+                rest_seconds: null,
+                notes: null,
+                sets: [],
+              },
+            ],
+            created_at: "x",
+            updated_at: "x",
+          },
+        })
+      )
+    );
+
+    const result = await getRoutineDetail("routine-1");
+    expect(result.exercises[0].supersetId).toBeNull();
+  });
 });
 
 describe("createRoutineFolder", () => {

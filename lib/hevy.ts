@@ -377,7 +377,13 @@ function toRoutineDetailOutput(r: HevyRoutine) {
       title: e.title ?? null,
       notes: e.notes,
       restSeconds: e.rest_seconds,
-      supersetId: e.superset_id ?? e.supersets_id ?? null,
+      // An explicitly-present "superset_id" key always wins, even when its
+      // value is null — only fall back to the "supersets_id" spelling when
+      // "superset_id" is entirely absent from the parsed JSON. Using `??`
+      // here would conflate "explicit null" with "key absent" and could
+      // silently prefer the wrong spelling if a response ever included both.
+      supersetId:
+        "superset_id" in e ? e.superset_id ?? null : e.supersets_id ?? null,
       sets: e.sets.map((s) => ({
         type: s.type,
         reps: s.reps,
