@@ -64,7 +64,7 @@ describe("POST /api/mcp auth", () => {
 });
 
 describe("POST /api/mcp tools/list", () => {
-  it("lists all 11 tools", async () => {
+  it("lists all 13 tools", async () => {
     const { json } = await callMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, AUTH_HEADER);
     const names = json.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual([
@@ -74,9 +74,11 @@ describe("POST /api/mcp tools/list", () => {
       "get_daily_macros",
       "get_nutrition_trends",
       "get_recent_workouts",
+      "get_routine_detail",
       "get_weight_trend",
       "get_workout_detail",
       "list_routine_folders",
+      "list_routines",
       "search_exercise_templates",
       "update_routine",
     ]);
@@ -430,6 +432,235 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const folders = JSON.parse(json.result.content[0].text);
     expect(folders).toEqual([{ id: 7, title: "週3回メニュー", index: 0 }]);
+  });
+
+  it("list_routines GETs and returns id/title/folderId/exerciseCount/updatedAt, no confirm required", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/routines?page=1&pageSize=10");
+      return new Response(
+        JSON.stringify({
+          page: 1,
+          page_count: 1,
+          routines: [
+            {
+              id: "routine-1",
+              title: "火曜：背中・脚",
+              folder_id: 7,
+              notes: null,
+              exercises: [{ exercise_template_id: "tmpl-deadlift", superset_id: null, rest_seconds: null, notes: null, sets: [] }],
+              created_at: "2026-08-01T00:00:00Z",
+              updated_at: "2026-08-02T00:00:00Z",
+            },
+          ],
+        }),
+        { status: 200 }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 17,
+        method: "tools/call",
+        params: { name: "list_routines", arguments: {} },
+      },
+      AUTH_HEADER
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const routines = JSON.parse(json.result.content[0].text);
+    expect(routines).toEqual([
+      {
+        id: "routine-1",
+        title: "火曜：背中・脚",
+        folderId: 7,
+        exerciseCount: 1,
+        updatedAt: "2026-08-02T00:00:00Z",
+      },
+    ]);
+  });
+
+  it("list_routines filters by a numeric folderId via the MCP tool input", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/routines?page=1&pageSize=10");
+      return new Response(
+        JSON.stringify({
+          page: 1,
+          page_count: 1,
+          routines: [
+            {
+              id: "routine-1",
+              title: "火曜：背中・脚",
+              folder_id: 7,
+              notes: null,
+              exercises: [{ exercise_template_id: "tmpl-deadlift", superset_id: null, rest_seconds: null, notes: null, sets: [] }],
+              created_at: "2026-08-01T00:00:00Z",
+              updated_at: "2026-08-02T00:00:00Z",
+            },
+            {
+              id: "routine-2",
+              title: "木曜：胸・肩",
+              folder_id: 9,
+              notes: null,
+              exercises: [],
+              created_at: "2026-08-01T00:00:00Z",
+              updated_at: "2026-08-03T00:00:00Z",
+            },
+          ],
+        }),
+        { status: 200 }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 19,
+        method: "tools/call",
+        params: { name: "list_routines", arguments: { folderId: 7 } },
+      },
+      AUTH_HEADER
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const routines = JSON.parse(json.result.content[0].text);
+    expect(routines).toEqual([
+      {
+        id: "routine-1",
+        title: "火曜：背中・脚",
+        folderId: 7,
+        exerciseCount: 1,
+        updatedAt: "2026-08-02T00:00:00Z",
+      },
+    ]);
+  });
+
+  it("list_routines filters to unfiled routines when folderId is explicit null via the MCP tool input", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/routines?page=1&pageSize=10");
+      return new Response(
+        JSON.stringify({
+          page: 1,
+          page_count: 1,
+          routines: [
+            {
+              id: "routine-1",
+              title: "火曜：背中・脚",
+              folder_id: 7,
+              notes: null,
+              exercises: [],
+              created_at: "2026-08-01T00:00:00Z",
+              updated_at: "2026-08-02T00:00:00Z",
+            },
+            {
+              id: "routine-3",
+              title: "未整理メニュー",
+              folder_id: null,
+              notes: null,
+              exercises: [],
+              created_at: "2026-08-01T00:00:00Z",
+              updated_at: "2026-08-04T00:00:00Z",
+            },
+          ],
+        }),
+        { status: 200 }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 20,
+        method: "tools/call",
+        params: { name: "list_routines", arguments: { folderId: null } },
+      },
+      AUTH_HEADER
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const routines = JSON.parse(json.result.content[0].text);
+    expect(routines).toEqual([
+      {
+        id: "routine-3",
+        title: "未整理メニュー",
+        folderId: null,
+        exerciseCount: 0,
+        updatedAt: "2026-08-04T00:00:00Z",
+      },
+    ]);
+  });
+
+  it("get_routine_detail GETs /v1/routines/{id} and returns full exercise/set detail, no confirm required", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/routines/routine-1");
+      return new Response(
+        JSON.stringify({
+          routine: {
+            id: "routine-1",
+            title: "火曜：背中・脚",
+            folder_id: 7,
+            notes: null,
+            exercises: [
+              {
+                exercise_template_id: "tmpl-deadlift",
+                title: "Deadlift (Barbell)",
+                superset_id: null,
+                rest_seconds: 90,
+                notes: null,
+                sets: [
+                  { type: "normal", weight_kg: 120, reps: 4, rep_range: null, distance_meters: null, duration_seconds: null },
+                ],
+              },
+            ],
+            created_at: "2026-08-01T00:00:00Z",
+            updated_at: "2026-08-02T00:00:00Z",
+          },
+        }),
+        { status: 200 }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 18,
+        method: "tools/call",
+        params: { name: "get_routine_detail", arguments: { routineId: "routine-1" } },
+      },
+      AUTH_HEADER
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const routine = JSON.parse(json.result.content[0].text);
+    expect(routine).toEqual({
+      id: "routine-1",
+      title: "火曜：背中・脚",
+      folderId: 7,
+      notes: null,
+      exercises: [
+        {
+          exerciseTemplateId: "tmpl-deadlift",
+          title: "Deadlift (Barbell)",
+          notes: null,
+          restSeconds: 90,
+          supersetId: null,
+          sets: [
+            {
+              type: "normal",
+              reps: 4,
+              repRange: null,
+              weightKg: 120,
+              distanceMeters: null,
+              durationSeconds: null,
+            },
+          ],
+        },
+      ],
+    });
   });
 
   it("create_routine_folder is rejected before touching the Hevy API when confirm is not true", async () => {

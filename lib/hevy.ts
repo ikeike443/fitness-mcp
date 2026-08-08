@@ -179,13 +179,28 @@ interface HevyRoutineSet {
   type: string;
   weight_kg: number | null;
   reps: number | null;
+  // Templates commonly target a range ("8-12 reps") rather than a fixed
+  // rep count — reps alone is null in that case, so get_routine_detail
+  // must surface this or it would silently look empty for most templates.
+  rep_range?: { start: number | null; end: number | null } | null;
   distance_meters: number | null;
   duration_seconds: number | null;
 }
 
 interface HevyRoutineExercise {
   exercise_template_id: string;
-  superset_id: number | null;
+  // Present on read responses (GET /v1/routines[/{id}]) so the exercise can
+  // be displayed without a round-trip to search_exercise_templates; not
+  // sent on writes (buildRoutineFields below never includes it).
+  title?: string;
+  // Hevy's write schema (POST/PUT, confirmed against a real account) uses
+  // "superset_id" — see buildRoutineFields. Third-party reverse-engineered
+  // read schemas report the same field back as "supersets_id" on GET
+  // responses, which would otherwise silently read as undefined here.
+  // Unverified against a real read response; accepting both spellings is
+  // cheap insurance either way.
+  superset_id?: number | null;
+  supersets_id?: number | null;
   rest_seconds: number | null;
   notes: string | null;
   sets: HevyRoutineSet[];
@@ -351,6 +366,56 @@ export async function updateRoutine(
   return toRoutineOutput(unwrapRoutineResponse(data));
 }
 
+function toRoutineDetailOutput(r: HevyRoutine) {
+  return {
+    id: r.id,
+    title: r.title,
+    folderId: r.folder_id,
+    notes: r.notes,
+    exercises: (r.exercises ?? []).map((e) => ({
+      exerciseTemplateId: e.exercise_template_id,
+      title: e.title ?? null,
+      notes: e.notes,
+      restSeconds: e.rest_seconds,
+      // An explicitly-present "superset_id" key always wins, even when its
+      // value is null — only fall back to the "supersets_id" spelling when
+      // "superset_id" is entirely absent from the parsed JSON. Using `??`
+      // here would conflate "explicit null" with "key absent" and could
+      // silently prefer the wrong spelling if a response ever included both.
+      supersetId:
+        "superset_id" in e ? e.superset_id ?? null : e.supersets_id ?? null,
+      sets: e.sets.map((s) => ({
+        type: s.type,
+        reps: s.reps,
+        repRange: s.rep_range ?? null,
+        weightKg: s.weight_kg,
+        distanceMeters: s.distance_meters,
+        durationSeconds: s.duration_seconds,
+      })),
+    })),
+  };
+}
+
+// GET /v1/routines/{id} wraps a single routine object as { routine: {...} }
+// — unlike POST/PUT above, which wrap the same resource as a single-element
+// array (see unwrapRoutineResponse). Read-only: this never touches
+// create/update's request-building path, so it carries none of the
+// notes/set-type validation those do.
+export async function getRoutineDetail(routineId: string) {
+  const data = await hevyFetch<{ routine?: HevyRoutine }>(
+    `/v1/routines/${encodeURIComponent(routineId)}`
+  );
+  const routine = data.routine;
+  if (!routine || Array.isArray(routine)) {
+    throw new Error(
+      `Unexpected Hevy routine response shape (expected { routine: Routine }): ${JSON.stringify(
+        data
+      )}`
+    );
+  }
+  return toRoutineDetailOutput(routine);
+}
+
 interface HevyRoutineFoldersResponse {
   page: number;
   page_count: number;
@@ -407,6 +472,51 @@ export async function createRoutineFolder(title: string) {
     );
   }
   return { id: folder.id, title: folder.title };
+}
+
+interface HevyRoutinesResponse {
+  page: number;
+  page_count: number;
+  routines: HevyRoutine[];
+}
+
+// GET /v1/routines is paginated (max pageSize 10, same shape as
+// /v1/routine_folders above) and has no server-side folder filter, so
+// filtering by folderId means walking every page and filtering
+// client-side — same tradeoff as searchExerciseTemplates below, just
+// without the response cache (routine lists are cheap enough, and change
+// often enough, that staleness isn't worth the tradeoff here).
+const ROUTINE_PAGE_SIZE = 10;
+const ROUTINE_PAGE_CAP = 50; // safety cap (~500 routines)
+
+async function listAllRoutines(): Promise<HevyRoutine[]> {
+  const all: HevyRoutine[] = [];
+  let page = 1;
+  while (page <= ROUTINE_PAGE_CAP) {
+    const data = await hevyFetch<HevyRoutinesResponse>(
+      `/v1/routines?page=${page}&pageSize=${ROUTINE_PAGE_SIZE}`
+    );
+    all.push(...data.routines);
+    if (page >= data.page_count) break;
+    page++;
+  }
+  return all;
+}
+
+// folderId omitted (undefined) -> every routine, any folder.
+// folderId: null            -> only routines not filed in any folder.
+// folderId: <number>        -> only routines filed in that folder.
+export async function listRoutines(folderId?: number | null) {
+  const all = await listAllRoutines();
+  const filtered =
+    folderId === undefined ? all : all.filter((r) => r.folder_id === folderId);
+  return filtered.map((r) => ({
+    id: r.id,
+    title: r.title,
+    folderId: r.folder_id,
+    exerciseCount: (r.exercises ?? []).length,
+    updatedAt: r.updated_at,
+  }));
 }
 
 // --- Exercise template search -------------------------------------------

@@ -7,6 +7,8 @@ import {
   updateRoutine,
   createRoutineFolder,
   listRoutineFolders,
+  listRoutines,
+  getRoutineDetail,
 } from "./hevy";
 import type { CreateRoutineInput } from "./hevy";
 
@@ -297,6 +299,193 @@ describe("updateRoutine", () => {
   });
 });
 
+describe("getRoutineDetail", () => {
+  it("GETs /v1/routines/{id} and returns full exercise/set detail", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/routines/routine-1");
+      // Unlike POST/PUT (single-element array under "routine"), GET wraps a
+      // single routine object directly under "routine".
+      return jsonResponse({
+        routine: {
+          id: "routine-1",
+          title: "Tuesday: Back & Legs",
+          folder_id: 7,
+          notes: "focus on form",
+          exercises: [
+            {
+              exercise_template_id: "tmpl-deadlift",
+              title: "Deadlift (Barbell)",
+              superset_id: null,
+              rest_seconds: 90,
+              notes: "go heavy",
+              sets: [
+                {
+                  type: "warmup",
+                  weight_kg: 60,
+                  reps: 5,
+                  rep_range: null,
+                  distance_meters: null,
+                  duration_seconds: null,
+                },
+                {
+                  type: "normal",
+                  weight_kg: null,
+                  reps: null,
+                  rep_range: { start: 8, end: 12 },
+                  distance_meters: null,
+                  duration_seconds: null,
+                },
+              ],
+            },
+          ],
+          created_at: "2026-08-01T00:00:00Z",
+          updated_at: "2026-08-02T00:00:00Z",
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getRoutineDetail("routine-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      id: "routine-1",
+      title: "Tuesday: Back & Legs",
+      folderId: 7,
+      notes: "focus on form",
+      exercises: [
+        {
+          exerciseTemplateId: "tmpl-deadlift",
+          title: "Deadlift (Barbell)",
+          notes: "go heavy",
+          restSeconds: 90,
+          supersetId: null,
+          sets: [
+            {
+              type: "warmup",
+              reps: 5,
+              repRange: null,
+              weightKg: 60,
+              distanceMeters: null,
+              durationSeconds: null,
+            },
+            {
+              type: "normal",
+              reps: null,
+              repRange: { start: 8, end: 12 },
+              weightKg: null,
+              distanceMeters: null,
+              durationSeconds: null,
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("URL-encodes a routineId containing special characters", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/routines/foo%2Fbar..");
+      return jsonResponse({
+        routine: {
+          id: "foo/bar..",
+          title: "x",
+          folder_id: null,
+          notes: null,
+          exercises: [],
+          created_at: "x",
+          updated_at: "x",
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getRoutineDetail("foo/bar..");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws a clear diagnostic if Hevy ever returns the array-wrapped shape instead", async () => {
+    // Regression guard for the opposite mixup of the create/update bug: GET
+    // wraps a single object, not an array — if Hevy ever changed that (or a
+    // caller pointed this at the wrong shape), this should fail loudly
+    // rather than silently returning undefined fields.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ routine: [{ id: "routine-1" }] }))
+    );
+
+    await expect(getRoutineDetail("routine-1")).rejects.toThrow(
+      /Unexpected Hevy routine response shape/
+    );
+  });
+
+  it("falls back to the supersets_id spelling if superset_id is absent", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          routine: {
+            id: "routine-1",
+            title: "x",
+            folder_id: null,
+            notes: null,
+            exercises: [
+              {
+                exercise_template_id: "tmpl-bench",
+                supersets_id: 2,
+                rest_seconds: null,
+                notes: null,
+                sets: [],
+              },
+            ],
+            created_at: "x",
+            updated_at: "x",
+          },
+        })
+      )
+    );
+
+    const result = await getRoutineDetail("routine-1");
+    expect(result.exercises[0].supersetId).toBe(2);
+  });
+
+  it("prefers an explicitly-present superset_id: null over a simultaneous supersets_id value", async () => {
+    // Regression guard: `superset_id: null` means "explicitly no superset",
+    // which must win even if a stray `supersets_id` key with a real value is
+    // also present. A naive `e.superset_id ?? e.supersets_id ?? null` would
+    // incorrectly fall through to 2 here since `??` treats explicit null the
+    // same as the key being absent.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          routine: {
+            id: "routine-1",
+            title: "x",
+            folder_id: null,
+            notes: null,
+            exercises: [
+              {
+                exercise_template_id: "tmpl-bench",
+                superset_id: null,
+                supersets_id: 2,
+                rest_seconds: null,
+                notes: null,
+                sets: [],
+              },
+            ],
+            created_at: "x",
+            updated_at: "x",
+          },
+        })
+      )
+    );
+
+    const result = await getRoutineDetail("routine-1");
+    expect(result.exercises[0].supersetId).toBeNull();
+  });
+});
+
 describe("createRoutineFolder", () => {
   it("POSTs the correct body and returns id/title", async () => {
     const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
@@ -406,6 +595,122 @@ describe("listRoutineFolders", () => {
     );
 
     expect(await listRoutineFolders()).toEqual([]);
+  });
+});
+
+describe("listRoutines", () => {
+  function routine(overrides: Partial<{ id: string; title: string; folder_id: number | null; exerciseCount: number }>) {
+    return {
+      id: overrides.id ?? "r1",
+      title: overrides.title ?? "Routine",
+      folder_id: overrides.folder_id ?? null,
+      notes: null,
+      exercises: Array.from({ length: overrides.exerciseCount ?? 0 }, () => ({
+        exercise_template_id: "x",
+        superset_id: null,
+        rest_seconds: null,
+        notes: null,
+        sets: [],
+      })),
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-02T00:00:00Z",
+    };
+  }
+
+  it("GETs a single page and returns id/title/folderId/exerciseCount/updatedAt", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/routines?page=1&pageSize=10");
+      return jsonResponse({
+        page: 1,
+        page_count: 1,
+        routines: [routine({ id: "r1", title: "Push", folder_id: 7, exerciseCount: 3 })],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await listRoutines();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([
+      {
+        id: "r1",
+        title: "Push",
+        folderId: 7,
+        exerciseCount: 3,
+        updatedAt: "2026-08-02T00:00:00Z",
+      },
+    ]);
+  });
+
+  it("walks every page and merges results when folderId is omitted", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("page=1")) {
+        return jsonResponse({
+          page: 1,
+          page_count: 2,
+          routines: [routine({ id: "r1" })],
+        });
+      }
+      expect(url).toContain("page=2");
+      return jsonResponse({
+        page: 2,
+        page_count: 2,
+        routines: [routine({ id: "r2" })],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await listRoutines();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.map((r) => r.id)).toEqual(["r1", "r2"]);
+  });
+
+  it("filters to a specific folderId, still walking every page first", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          page: 1,
+          page_count: 1,
+          routines: [
+            routine({ id: "r1", folder_id: 7 }),
+            routine({ id: "r2", folder_id: 9 }),
+          ],
+        })
+      )
+    );
+
+    const result = await listRoutines(7);
+    expect(result.map((r) => r.id)).toEqual(["r1"]);
+  });
+
+  it("filters to unfiled routines when folderId is explicitly null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          page: 1,
+          page_count: 1,
+          routines: [
+            routine({ id: "r1", folder_id: null }),
+            routine({ id: "r2", folder_id: 9 }),
+          ],
+        })
+      )
+    );
+
+    const result = await listRoutines(null);
+    expect(result.map((r) => r.id)).toEqual(["r1"]);
+  });
+
+  it("returns an empty array when the account has no routines", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ page: 1, page_count: 1, routines: [] }))
+    );
+
+    expect(await listRoutines()).toEqual([]);
   });
 });
 
