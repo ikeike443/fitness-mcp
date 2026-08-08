@@ -10,7 +10,7 @@ A personal remote MCP (Model Context Protocol) server that lets Claude read your
 
 ## Status
 
-- **Hevy**: implemented — read: recent workouts, workout detail, body measurements, exercise template search, routine folder listing. Write: create/update routines (workout plan templates) and routine folders, so a training menu designed in conversation can be pushed directly into the Hevy app. Uses the official Hevy REST API directly.
+- **Hevy**: implemented — read: recent workouts, workout detail, body measurements, exercise template search, routine folder listing, routine listing, routine detail. Write: create/update routines (workout plan templates) and routine folders, so a training menu designed in conversation can be pushed directly into the Hevy app. Uses the official Hevy REST API directly.
 - **MacroFactor**: implemented, but indirectly. MacroFactor's backend enabled Firebase App Check enforcement in May 2026, which blocks all third-party API access — there is no legitimate way to pull MacroFactor data live. Instead, this server reads the Google Sheets files produced by MacroFactor's manual "Granular Export" feature, which the user saves into a "Health data" Drive folder. Every MacroFactor tool call lazily syncs any newly exported files first, so a fresh manual export becomes visible to Claude on the very next question — no separate trigger/webhook needed.
 
 ## Tools exposed
@@ -21,6 +21,8 @@ A personal remote MCP (Model Context Protocol) server that lets Claude read your
 | `get_workout_detail` | read | Full sets/reps/weight detail for one workout |
 | `get_body_measurements` | read | Recent Hevy body measurement entries (weight, body fat %) |
 | `search_exercise_templates` | read | Search Hevy's exercise library by name to resolve the `exercise_template_id` needed by `create_routine`/`update_routine` |
+| `list_routines` | read | List existing Hevy routines (id, title, folder, exercise count, updated time), optionally filtered by folder, to find a `routineId` |
+| `get_routine_detail` | read | Full exercise/set/rep(-range)/weight/rest-time detail for one routine (template) — read the current contents before `update_routine` overwrites them |
 | `create_routine` | write | Create a new Hevy routine (workout plan template) |
 | `update_routine` | write | Replace an existing Hevy routine's title/notes/exercises entirely (folder assignment cannot be changed via update — see below) |
 | `list_routine_folders` | read | List existing routine folders (id, title, index) to resolve a `folderId` by name |
@@ -104,7 +106,7 @@ curl -X POST http://localhost:3000/api/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Should return the 11 tools above. A request with a missing/wrong token should get `401`.
+Should return the 13 tools above. A request with a missing/wrong token should get `401`.
 
 ## Testing
 
@@ -119,22 +121,23 @@ npm run test:e2e     # starts a real `next start` server and hits it over real H
                       # (node's built-in test runner, no extra dependency)
 ```
 
-- **Unit** (`lib/*.test.ts`): date parsing, MacroFactor tab parsing, monthly/yearly rollup math, bearer-token verification, OAuth code signing/PKCE/redirect-URI allowlisting (including the RFC 7636 PKCE test vector), Hevy routine request-body construction and validation (`@` rejection in notes, set-type enum, read-only field stripping, exercise-template search caching/pagination, routine-folder listing/pagination-walk).
+- **Unit** (`lib/*.test.ts`): date parsing, MacroFactor tab parsing, monthly/yearly rollup math, bearer-token verification, OAuth code signing/PKCE/redirect-URI allowlisting (including the RFC 7636 PKCE test vector), Hevy routine request-body construction and validation (`@` rejection in notes, set-type enum, read-only field stripping, exercise-template search caching/pagination, routine-folder listing/pagination-walk, routine listing/folder-filtering/pagination-walk, routine detail read-shape unwrapping).
 - **Integration** (`test/integration/*.test.ts`): the MacroFactor sync algorithm (multi-export merge, overlap resolution, incremental rollups) against `test/fixtures/fakeGoogleDrive.ts`; the real `app/api/mcp/route.ts` handler wired to real `lib/auth.ts`/`lib/hevy.ts`/`lib/macrofactorStore.ts` with only `fetch` and Drive mocked, including a full `search_exercise_templates` → `create_routine_folder` → `create_routine` × 3 walkthrough of a real 3-day/week training program; the real `/api/oauth/authorize` and `/api/oauth/token` route handlers; and the `.well-known` OAuth metadata routes.
-- **E2E** (`test/e2e/*.e2e.test.mjs`): boots the production build and asserts over real HTTP — health check, 401 on bad/missing auth, `tools/list` returns all 11 tools, OAuth discovery metadata, and a full authorization-code + PKCE round trip that ends with a working access token against `/api/mcp`. Doesn't exercise real Hevy/MacroFactor data (CI has no real credentials by design).
+- **E2E** (`test/e2e/*.e2e.test.mjs`): boots the production build and asserts over real HTTP — health check, 401 on bad/missing auth, `tools/list` returns all 13 tools, OAuth discovery metadata, and a full authorization-code + PKCE round trip that ends with a working access token against `/api/mcp`. Doesn't exercise real Hevy/MacroFactor data (CI has no real credentials by design).
 
 ### Manually verifying Hevy write operations
 
-CI never touches real Hevy data, so the routine-write tools (`create_routine`, `update_routine`, `create_routine_folder`) — and `list_routine_folders`, which reads the same resource — need a one-off manual check against a real Hevy Pro account after any change to them:
+CI never touches real Hevy data, so the routine-write tools (`create_routine`, `update_routine`, `create_routine_folder`) — and `list_routine_folders`, `list_routines`, `get_routine_detail`, which read the same resource — need a one-off manual check against a real Hevy Pro account after any change to them:
 
 1. Set a real `HEVY_API_KEY` in `.env.local`, then run `vercel dev`.
 2. Call `search_exercise_templates` with a real query (e.g. via the smoke-test `curl` pattern above, using `tools/call` instead of `tools/list`) and confirm real candidates come back.
 3. Call `create_routine` with an obviously-throwaway title (e.g. `"fitness-mcp manual test — delete me"`) and `confirm: true`, and note the returned `id`.
 4. Open the Hevy app or web app and visually confirm the routine was created with the expected exercises, sets, reps, and weights.
 5. Check whether the returned `webUrl` (`https://hevy.com/routines/{id}`) actually opens the routine — it's an unverified best-effort guess at Hevy's URL pattern, not a documented API field. If it doesn't resolve, that's worth a follow-up to remove or fix the field.
-6. Optionally call `update_routine` against the same `id` to verify the overwrite path (note it has no `folderId` parameter — Hevy's update endpoint has no `folder_id` field at all, and sending one, even `null`, 400s, so a routine's folder can only be set at creation), and `create_routine_folder` followed by `create_routine` with its returned `folderId` to verify folder filing. Call `list_routine_folders` afterward and confirm the newly created folder shows up with a matching `id`/`title`.
-7. **Delete the test routine manually in the Hevy app.** Hevy's public API has no documented `DELETE /v1/routines` endpoint, so this server cannot clean up after itself — there is intentionally no `delete_routine` tool.
-8. Never commit a real `HEVY_API_KEY`, and never run this check in CI.
+6. Call `get_routine_detail` with that `id` and confirm the returned exercises/sets/reps/weights match what you just created — this also confirms the `title` and `superset_id` fields actually come back on a real GET response (see the "unverified" comments on those fields in `lib/hevy.ts`). Call `list_routines` (with no `folderId`, then with the folder's id, then with `folderId: null`) and confirm the new routine shows up in the right buckets.
+7. Optionally call `update_routine` against the same `id` to verify the overwrite path (note it has no `folderId` parameter — Hevy's update endpoint has no `folder_id` field at all, and sending one, even `null`, 400s, so a routine's folder can only be set at creation), and `create_routine_folder` followed by `create_routine` with its returned `folderId` to verify folder filing. Call `list_routine_folders` afterward and confirm the newly created folder shows up with a matching `id`/`title`.
+8. **Delete the test routine manually in the Hevy app.** Hevy's public API has no documented `DELETE /v1/routines` endpoint, so this server cannot clean up after itself — there is intentionally no `delete_routine` tool.
+9. Never commit a real `HEVY_API_KEY`, and never run this check in CI.
 
 ## Environment variables
 
@@ -163,6 +166,6 @@ Custom connectors can only be **added** from claude.ai (web) or the desktop app 
 2. Name: `Fitness Data`. URL: `https://fitness-mcp-eight.vercel.app/api/mcp`.
 3. If your account has the "Request headers" beta: add `Authorization: Bearer <MCP_BEARER_TOKEN>` there and skip to step 5.
 4. Otherwise, open Advanced settings and fill in **OAuth Client ID** / **OAuth Client Secret** with the `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` values set in Vercel. Claude will discover the `/authorize` and `/token` endpoints automatically via this server's `.well-known` metadata.
-5. Save. Claude should list the 11 tools above.
+5. Save. Claude should list the 13 tools above.
 
 Try asking: "直近のワークアウトを教えて" (tell me about my recent workouts), "今月の平均カロリーは?" (what's my average calorie intake this month?), or "3日/週の筋トレメニューを考えてHevyに登録して" (design a 3-day/week training menu and register it in Hevy).

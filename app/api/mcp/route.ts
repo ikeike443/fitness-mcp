@@ -10,6 +10,8 @@ import {
   updateRoutine,
   createRoutineFolder,
   listRoutineFolders,
+  listRoutines,
+  getRoutineDetail,
 } from "@/lib/hevy";
 import {
   getDailyMacros,
@@ -298,6 +300,49 @@ const handler = createMcpHandler(
         const results = await searchExerciseTemplates(query, limit ?? 10);
         return {
           content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "list_routines",
+      {
+        title: "List Hevy routines",
+        description:
+          "List the user's existing Hevy routines (workout plan templates) — id, title, folder, exercise count, last updated. Use this to find a routineId for get_routine_detail/update_routine when the user doesn't already know it. Walks all pages, so the result is always complete.",
+        inputSchema: z.object({
+          folderId: z
+            .number()
+            .int()
+            .nullable()
+            .optional()
+            .describe(
+              "Filter to routines in this folder ID (from list_routine_folders). Pass null explicitly to list only routines not filed in any folder. Omit entirely to list every routine regardless of folder."
+            ),
+        }),
+      },
+      async ({ folderId }) => {
+        const routines = await listRoutines(folderId);
+        return {
+          content: [{ type: "text", text: JSON.stringify(routines, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "get_routine_detail",
+      {
+        title: "Get Hevy routine detail",
+        description:
+          "Get full exercise/set/rep(-range)/weight/rest-time detail for a single Hevy routine (template) by its ID (obtain the ID from list_routines or list_routine_folders + list_routines). Read-only. Call this before update_routine whenever you don't already know the routine's exact current contents — e.g. after the user edited it manually in the Hevy app — since update_routine replaces the whole routine and would silently discard anything you're not already aware of.",
+        inputSchema: z.object({
+          routineId: z.string().min(1).describe("The Hevy routine ID"),
+        }),
+      },
+      async ({ routineId }) => {
+        const routine = await getRoutineDetail(routineId);
+        return {
+          content: [{ type: "text", text: JSON.stringify(routine, null, 2) }],
         };
       }
     );
