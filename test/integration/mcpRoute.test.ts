@@ -1,10 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-vi.mock("../../lib/googleDrive", () => import("../fixtures/fakeGoogleDrive"));
-
-import { resetFakeDrive, seedExportFile } from "../fixtures/fakeGoogleDrive";
-import { HEALTH_DATA_FOLDER_ID } from "../../lib/macrofactorStore";
-
 process.env.MCP_BEARER_TOKEN = "test-bearer-token";
 process.env.HEVY_API_KEY = "dummy-hevy-key";
 
@@ -36,7 +31,6 @@ async function callMcp(body: unknown, headers: Record<string, string> = {}) {
 const AUTH_HEADER = { authorization: "Bearer test-bearer-token" };
 
 beforeEach(() => {
-  resetFakeDrive();
   vi.unstubAllGlobals();
 });
 
@@ -64,18 +58,15 @@ describe("POST /api/mcp auth", () => {
 });
 
 describe("POST /api/mcp tools/list", () => {
-  it("lists all 13 tools", async () => {
+  it("lists all 10 tools", async () => {
     const { json } = await callMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, AUTH_HEADER);
     const names = json.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual([
       "create_routine",
       "create_routine_folder",
       "get_body_measurements",
-      "get_daily_macros",
-      "get_nutrition_trends",
       "get_recent_workouts",
       "get_routine_detail",
-      "get_weight_trend",
       "get_workout_detail",
       "list_routine_folders",
       "list_routines",
@@ -861,38 +852,5 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     }
 
     expect(routineCreateCalls).toBe(3);
-  });
-});
-
-describe("POST /api/mcp tools/call — MacroFactor (real lib/macrofactorStore.ts, Drive mocked)", () => {
-  it("get_daily_macros returns data merged from a fake Drive export", async () => {
-    seedExportFile(HEALTH_DATA_FOLDER_ID, {
-      name: "MacroFactor-20260801090000",
-      modifiedTime: "2026-08-01T09:00:00.000Z",
-      tabs: {
-        "カロリー＆PFC": [
-          ["日時", "カロリー（kcal ）", "脂質（g ）", "炭水化物（g ）", "たんぱく質（g ）"],
-          ["2026/8/1", "2200", "60", "220", "150"],
-        ],
-      },
-    });
-
-    const { json } = await callMcp(
-      {
-        jsonrpc: "2.0",
-        id: 4,
-        method: "tools/call",
-        params: {
-          name: "get_daily_macros",
-          arguments: { startDate: "2026-08-01", endDate: "2026-08-01" },
-        },
-      },
-      AUTH_HEADER
-    );
-
-    const macros = JSON.parse(json.result.content[0].text);
-    expect(macros).toEqual([
-      { date: "2026-08-01", calories: 2200, proteinG: 150, carbsG: 220, fatG: 60, steps: undefined },
-    ]);
   });
 });

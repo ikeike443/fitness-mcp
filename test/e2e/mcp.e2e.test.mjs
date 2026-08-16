@@ -1,11 +1,10 @@
 // End-to-end test: starts a real `next start` server and hits it over real
 // HTTP. Requires `npm run build` to have been run first.
 //
-// This intentionally does NOT exercise real Hevy/MacroFactor data — CI has no
-// real HEVY_API_KEY or Google OAuth credentials (GOOGLE_OAUTH_CLIENT_ID /
-// GOOGLE_OAUTH_CLIENT_SECRET / GOOGLE_OAUTH_REFRESH_TOKEN — this repo may be
-// public), so it only verifies the protocol-level surface: the server boots,
-// serves the health-check page, enforces bearer auth, and lists all tools.
+// This intentionally does NOT exercise real Hevy data — CI has no real
+// HEVY_API_KEY (this repo may be public), so it only verifies the
+// protocol-level surface: the server boots, serves the health-check page,
+// enforces bearer auth, and lists all tools.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -98,7 +97,7 @@ test("rejects requests with the wrong bearer token", async () => {
   assert.equal(res.status, 401);
 });
 
-test("lists all 13 tools with a valid bearer token", async () => {
+test("lists all 10 tools with a valid bearer token", async () => {
   const res = await fetch(`${BASE_URL}/api/mcp`, {
     method: "POST",
     headers: {
@@ -120,11 +119,8 @@ test("lists all 13 tools with a valid bearer token", async () => {
     "create_routine",
     "create_routine_folder",
     "get_body_measurements",
-    "get_daily_macros",
-    "get_nutrition_trends",
     "get_recent_workouts",
     "get_routine_detail",
-    "get_weight_trend",
     "get_workout_detail",
     "list_routine_folders",
     "list_routines",
