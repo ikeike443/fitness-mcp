@@ -290,6 +290,32 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("create_routine returns a dry-run preview when confirm is explicitly false", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 14,
+        method: "tools/call",
+        params: {
+          name: "create_routine",
+          arguments: {
+            title: "Tuesday: Back & Legs",
+            exercises: [{ exerciseTemplateId: "tmpl-deadlift", sets: [{ type: "normal", reps: 5 }] }],
+            confirm: false,
+          },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("create_routine POSTs the routine to Hevy and returns its id when confirmed", async () => {
     vi.stubGlobal(
       "fetch",
@@ -390,6 +416,33 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
         ],
       },
     });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("update_routine returns a dry-run preview when confirm is explicitly false", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 16,
+        method: "tools/call",
+        params: {
+          name: "update_routine",
+          arguments: {
+            routineId: "routine-1",
+            title: "Tuesday: Back & Legs (v2)",
+            exercises: [{ exerciseTemplateId: "tmpl-deadlift", sets: [{ type: "normal", reps: 4 }] }],
+            confirm: false,
+          },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
