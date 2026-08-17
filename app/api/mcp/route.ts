@@ -16,10 +16,12 @@ import {
   searchExerciseTemplates,
   getExerciseTemplateDetail,
   createCustomExerciseTemplate,
+  getExerciseHistory,
   createRoutine,
   updateRoutine,
   createRoutineFolder,
   listRoutineFolders,
+  getRoutineFolderDetail,
   listRoutines,
   getRoutineDetail,
   toCreateRoutineBody,
@@ -779,6 +781,37 @@ const handler = createMcpHandler(
     );
 
     server.registerTool(
+      "get_exercise_history",
+      {
+        title: "Get Hevy exercise history",
+        description:
+          "Get every set ever logged for one exercise across the user's past workouts (weight, reps, set type, RPE, and which workout each came from), optionally narrowed to a date range — for progression/PR questions like \"how has my bench press progressed\" without walking every workout yourself via list_workouts/get_workout_detail. Read-only.",
+        inputSchema: z.object({
+          exerciseTemplateId: z
+            .string()
+            .min(1)
+            .describe(
+              "Hevy exercise_template_id — obtain this by calling search_exercise_templates first."
+            ),
+          startDate: z
+            .string()
+            .optional()
+            .describe("ISO 8601 timestamp — only history on/after this time, or omit for no lower bound"),
+          endDate: z
+            .string()
+            .optional()
+            .describe("ISO 8601 timestamp — only history on/before this time, or omit for no upper bound"),
+        }),
+      },
+      async ({ exerciseTemplateId, startDate, endDate }) => {
+        const history = await getExerciseHistory(exerciseTemplateId, { startDate, endDate });
+        return {
+          content: [{ type: "text", text: JSON.stringify(history, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
       "list_routines",
       {
         title: "List Hevy routines",
@@ -884,6 +917,24 @@ const handler = createMcpHandler(
         const folders = await listRoutineFolders();
         return {
           content: [{ type: "text", text: JSON.stringify(folders, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "get_routine_folder_detail",
+      {
+        title: "Get Hevy routine folder detail",
+        description:
+          "Get detail (title, display index, created/updated timestamps) for a single Hevy routine folder by its id (obtain the id from list_routine_folders). Read-only.",
+        inputSchema: z.object({
+          folderId: z.number().int().describe("The Hevy routine folder ID"),
+        }),
+      },
+      async ({ folderId }) => {
+        const folder = await getRoutineFolderDetail(folderId);
+        return {
+          content: [{ type: "text", text: JSON.stringify(folder, null, 2) }],
         };
       }
     );

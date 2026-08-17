@@ -58,7 +58,7 @@ describe("POST /api/mcp auth", () => {
 });
 
 describe("POST /api/mcp tools/list", () => {
-  it("lists all 20 tools", async () => {
+  it("lists all 22 tools", async () => {
     const { json } = await callMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, AUTH_HEADER);
     const names = json.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual([
@@ -69,8 +69,10 @@ describe("POST /api/mcp tools/list", () => {
       "create_workout",
       "get_body_measurement_by_date",
       "get_body_measurements",
+      "get_exercise_history",
       "get_exercise_template_detail",
       "get_routine_detail",
+      "get_routine_folder_detail",
       "get_user_info",
       "get_workout_count",
       "get_workout_detail",
@@ -1002,6 +1004,67 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     expect(JSON.parse(json.result.content[0].text)).toEqual({ id: "123", title: "Sled Push" });
   });
 
+  it("get_exercise_history GETs /v1/exercise_history/{id} and returns mapped entries", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toBe(
+          "https://api.hevyapp.com/v1/exercise_history/tmpl-bench?start_date=2026-01-01T00%3A00%3A00Z"
+        );
+        return new Response(
+          JSON.stringify({
+            exercise_history: [
+              {
+                workout_id: "workout-1",
+                workout_title: "Push day",
+                workout_start_time: "2026-08-01T10:00:00Z",
+                workout_end_time: "2026-08-01T11:00:00Z",
+                exercise_template_id: "tmpl-bench",
+                weight_kg: 80,
+                reps: 8,
+                distance_meters: null,
+                duration_seconds: null,
+                rpe: 8.5,
+                custom_metric: null,
+                set_type: "normal",
+              },
+            ],
+          }),
+          { status: 200 }
+        );
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 40,
+        method: "tools/call",
+        params: {
+          name: "get_exercise_history",
+          arguments: { exerciseTemplateId: "tmpl-bench", startDate: "2026-01-01T00:00:00Z" },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    expect(JSON.parse(json.result.content[0].text)).toEqual([
+      {
+        workoutId: "workout-1",
+        workoutTitle: "Push day",
+        workoutStartTime: "2026-08-01T10:00:00Z",
+        workoutEndTime: "2026-08-01T11:00:00Z",
+        setType: "normal",
+        weightKg: 80,
+        reps: 8,
+        distanceMeters: null,
+        durationSeconds: null,
+        rpe: 8.5,
+        customMetric: null,
+      },
+    ]);
+  });
+
   it("create_routine returns a dry-run payload preview without touching the Hevy API when confirm is not true", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -1288,6 +1351,43 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const folders = JSON.parse(json.result.content[0].text);
     expect(folders).toEqual([{ id: 7, title: "週3回メニュー", index: 0 }]);
+  });
+
+  it("get_routine_folder_detail GETs /v1/routine_folders/{id} (unwrapped) and returns full detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/routine_folders/7");
+        return new Response(
+          JSON.stringify({
+            id: 7,
+            title: "週3回メニュー",
+            index: 0,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-02T00:00:00Z",
+          }),
+          { status: 200 }
+        );
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 41,
+        method: "tools/call",
+        params: { name: "get_routine_folder_detail", arguments: { folderId: 7 } },
+      },
+      AUTH_HEADER
+    );
+
+    expect(JSON.parse(json.result.content[0].text)).toEqual({
+      id: 7,
+      title: "週3回メニュー",
+      index: 0,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-02T00:00:00Z",
+    });
   });
 
   it("list_routines GETs and returns id/title/folderId/exerciseCount/updatedAt, no confirm required", async () => {
