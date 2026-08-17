@@ -58,14 +58,16 @@ describe("POST /api/mcp auth", () => {
 });
 
 describe("POST /api/mcp tools/list", () => {
-  it("lists all 17 tools", async () => {
+  it("lists all 20 tools", async () => {
     const { json } = await callMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, AUTH_HEADER);
     const names = json.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual([
+      "create_body_measurement",
       "create_custom_exercise_template",
       "create_routine",
       "create_routine_folder",
       "create_workout",
+      "get_body_measurement_by_date",
       "get_body_measurements",
       "get_exercise_template_detail",
       "get_routine_detail",
@@ -77,6 +79,7 @@ describe("POST /api/mcp tools/list", () => {
       "list_workout_events",
       "list_workouts",
       "search_exercise_templates",
+      "update_body_measurement",
       "update_routine",
       "update_workout",
     ]);
@@ -206,6 +209,69 @@ describe("POST /api/mcp tools/call — Hevy (real lib/hevy.ts, fetch mocked)", (
     expect(measurements).toEqual([
       { date: "2026-08-01", weightKg: 70.5, fatPercent: 15.2 },
     ]);
+  });
+
+  it("get_body_measurement_by_date GETs /v1/body_measurements/{date} and returns every field", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/body_measurements/2026-08-01");
+        return new Response(
+          JSON.stringify({
+            date: "2026-08-01",
+            weight_kg: 80.5,
+            lean_mass_kg: 65,
+            fat_percent: 18.5,
+            neck_cm: 38,
+            shoulder_cm: 115,
+            chest_cm: 95,
+            left_bicep_cm: 35,
+            right_bicep_cm: 35.5,
+            left_forearm_cm: 28,
+            right_forearm_cm: 28.5,
+            abdomen: 85,
+            waist: 80,
+            hips: 95,
+            left_thigh: 55,
+            right_thigh: 55.5,
+            left_calf: 37,
+            right_calf: 37.5,
+          }),
+          { status: 200 }
+        );
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 34,
+        method: "tools/call",
+        params: { name: "get_body_measurement_by_date", arguments: { date: "2026-08-01" } },
+      },
+      AUTH_HEADER
+    );
+
+    expect(JSON.parse(json.result.content[0].text)).toEqual({
+      date: "2026-08-01",
+      weightKg: 80.5,
+      leanMassKg: 65,
+      fatPercent: 18.5,
+      neckCm: 38,
+      shoulderCm: 115,
+      chestCm: 95,
+      leftBicepCm: 35,
+      rightBicepCm: 35.5,
+      leftForearmCm: 28,
+      rightForearmCm: 28.5,
+      abdomen: 85,
+      waist: 80,
+      hips: 95,
+      leftThigh: 55,
+      rightThigh: 55.5,
+      leftCalf: 37,
+      rightCalf: 37.5,
+    });
   });
 
   it("get_workout_count GETs /v1/workouts/count and returns the count", async () => {
@@ -552,6 +618,184 @@ describe("POST /api/mcp tools/call — Hevy workouts write (real lib/hevy.ts, fe
 
     const workout = JSON.parse(json.result.content[0].text);
     expect(workout.id).toBe("workout-1");
+  });
+});
+
+describe("POST /api/mcp tools/call — Hevy body measurements write (real lib/hevy.ts, fetch mocked)", () => {
+  const FULL_MEASUREMENT_API_RESPONSE = {
+    date: "2026-08-01",
+    weight_kg: 80.5,
+    lean_mass_kg: null,
+    fat_percent: 18.5,
+    neck_cm: null,
+    shoulder_cm: null,
+    chest_cm: null,
+    left_bicep_cm: null,
+    right_bicep_cm: null,
+    left_forearm_cm: null,
+    right_forearm_cm: null,
+    abdomen: null,
+    waist: null,
+    hips: null,
+    left_thigh: null,
+    right_thigh: null,
+    left_calf: null,
+    right_calf: null,
+  };
+
+  it("create_body_measurement returns a dry-run payload preview without touching the Hevy API when confirm is not true", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { status, json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 35,
+        method: "tools/call",
+        params: {
+          name: "create_body_measurement",
+          arguments: { date: "2026-08-01", weightKg: 80.5, fatPercent: 18.5 },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    expect(status).toBe(200);
+    expect(json.result.isError).toBeUndefined();
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(preview.payload).toEqual({
+      date: "2026-08-01",
+      weight_kg: 80.5,
+      lean_mass_kg: null,
+      fat_percent: 18.5,
+      neck_cm: null,
+      shoulder_cm: null,
+      chest_cm: null,
+      left_bicep_cm: null,
+      right_bicep_cm: null,
+      left_forearm_cm: null,
+      right_forearm_cm: null,
+      abdomen: null,
+      waist: null,
+      hips: null,
+      left_thigh: null,
+      right_thigh: null,
+      left_calf: null,
+      right_calf: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("create_body_measurement returns a dry-run preview when confirm is explicitly false", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 36,
+        method: "tools/call",
+        params: {
+          name: "create_body_measurement",
+          arguments: { date: "2026-08-01", weightKg: 80.5, confirm: false },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("create_body_measurement POSTs to Hevy, tolerates the empty write response, and returns the read-back entry when confirmed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        if (init.method === "POST") {
+          expect(url).toBe("https://api.hevyapp.com/v1/body_measurements");
+          return new Response("", { status: 200 });
+        }
+        expect(url).toBe("https://api.hevyapp.com/v1/body_measurements/2026-08-01");
+        return new Response(JSON.stringify(FULL_MEASUREMENT_API_RESPONSE), { status: 200 });
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 37,
+        method: "tools/call",
+        params: {
+          name: "create_body_measurement",
+          arguments: { date: "2026-08-01", weightKg: 80.5, fatPercent: 18.5, confirm: true },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const measurement = JSON.parse(json.result.content[0].text);
+    expect(measurement.date).toBe("2026-08-01");
+    expect(measurement.weightKg).toBe(80.5);
+    expect(measurement.fatPercent).toBe(18.5);
+  });
+
+  it("update_body_measurement returns a dry-run payload preview (no date field) without touching the Hevy API when confirm is not true", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 38,
+        method: "tools/call",
+        params: {
+          name: "update_body_measurement",
+          arguments: { date: "2026-08-01", weightKg: 81 },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(preview.payload).not.toHaveProperty("date");
+    expect(preview.payload.weight_kg).toBe(81);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("update_body_measurement PUTs to /v1/body_measurements/{date}, tolerates the empty write response, and returns the read-back entry when confirmed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        if (init.method === "PUT") {
+          expect(url).toBe("https://api.hevyapp.com/v1/body_measurements/2026-08-01");
+          return new Response("", { status: 200 });
+        }
+        expect(url).toBe("https://api.hevyapp.com/v1/body_measurements/2026-08-01");
+        return new Response(
+          JSON.stringify({ ...FULL_MEASUREMENT_API_RESPONSE, weight_kg: 81 }),
+          { status: 200 }
+        );
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 39,
+        method: "tools/call",
+        params: {
+          name: "update_body_measurement",
+          arguments: { date: "2026-08-01", weightKg: 81, confirm: true },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const measurement = JSON.parse(json.result.content[0].text);
+    expect(measurement.weightKg).toBe(81);
   });
 });
 
