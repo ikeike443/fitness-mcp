@@ -1753,6 +1753,23 @@ describe("getRoutineFolderDetail", () => {
       updatedAt: "2026-01-02T00:00:00Z",
     });
   });
+
+  it("URL-encodes a folderId containing special characters", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/routine_folders/foo%2Fbar..");
+      return jsonResponse({
+        id: "foo/bar..",
+        title: "x",
+        index: 0,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-02T00:00:00Z",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getRoutineFolderDetail("foo/bar..");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("getExerciseHistory", () => {
@@ -1811,6 +1828,30 @@ describe("getExerciseHistory", () => {
       startDate: "2026-01-01T00:00:00Z",
       endDate: "2026-12-31T23:59:59Z",
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes only start_date when only startDate is given", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toContain("start_date=2026-01-01T00%3A00%3A00Z");
+      expect(url).not.toContain("end_date=");
+      return jsonResponse({ exercise_history: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getExerciseHistory("tmpl-bench", { startDate: "2026-01-01T00:00:00Z" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes only end_date when only endDate is given", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toContain("end_date=2026-12-31T23%3A59%3A59Z");
+      expect(url).not.toContain("start_date=");
+      return jsonResponse({ exercise_history: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getExerciseHistory("tmpl-bench", { endDate: "2026-12-31T23:59:59Z" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
