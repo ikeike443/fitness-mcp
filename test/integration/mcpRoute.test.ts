@@ -239,7 +239,7 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     ]);
   });
 
-  it("create_routine is rejected before touching the Hevy API when confirm is not true", async () => {
+  it("create_routine returns a dry-run payload preview without touching the Hevy API when confirm is not true", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -260,8 +260,33 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     );
 
     expect(status).toBe(200);
-    expect(json.result.isError).toBe(true);
-    expect(json.result.content[0].text).toMatch(/confirm/);
+    expect(json.result.isError).toBeUndefined();
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(preview.payload).toEqual({
+      routine: {
+        title: "Tuesday: Back & Legs",
+        notes: null,
+        exercises: [
+          {
+            exercise_template_id: "tmpl-deadlift",
+            superset_id: null,
+            rest_seconds: null,
+            notes: null,
+            sets: [
+              {
+                type: "normal",
+                weight_kg: null,
+                reps: 5,
+                distance_meters: null,
+                duration_seconds: null,
+              },
+            ],
+          },
+        ],
+        folder_id: null,
+      },
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -317,7 +342,7 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     });
   });
 
-  it("update_routine is rejected before touching the Hevy API when confirm is not true", async () => {
+  it("update_routine returns a dry-run payload preview without touching the Hevy API when confirm is not true", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -339,8 +364,32 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     );
 
     expect(status).toBe(200);
-    expect(json.result.isError).toBe(true);
-    expect(json.result.content[0].text).toMatch(/confirm/);
+    expect(json.result.isError).toBeUndefined();
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(preview.payload).toEqual({
+      routine: {
+        title: "Tuesday: Back & Legs (v2)",
+        notes: null,
+        exercises: [
+          {
+            exercise_template_id: "tmpl-deadlift",
+            superset_id: null,
+            rest_seconds: null,
+            notes: null,
+            sets: [
+              {
+                type: "normal",
+                weight_kg: null,
+                reps: 4,
+                distance_meters: null,
+                duration_seconds: null,
+              },
+            ],
+          },
+        ],
+      },
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -654,7 +703,7 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     });
   });
 
-  it("create_routine_folder is rejected before touching the Hevy API when confirm is not true", async () => {
+  it("create_routine_folder returns a dry-run payload preview without touching the Hevy API when confirm is not true", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -672,8 +721,32 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     );
 
     expect(status).toBe(200);
-    expect(json.result.isError).toBe(true);
-    expect(json.result.content[0].text).toMatch(/confirm/);
+    expect(json.result.isError).toBeUndefined();
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(preview.payload).toEqual({ routine_folder: { title: "週3回メニュー" } });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("create_routine_folder returns a dry-run preview when confirm is explicitly false", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 17,
+        method: "tools/call",
+        params: {
+          name: "create_routine_folder",
+          arguments: { title: "週3回メニュー", confirm: false },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

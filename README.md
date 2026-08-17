@@ -10,7 +10,7 @@ A personal remote MCP (Model Context Protocol) server that lets Claude read and 
 
 ## Status
 
-- **Hevy**: implemented — read: recent workouts, workout detail, body measurements, exercise template search, routine folder listing, routine listing, routine detail. Write: create/update routines (workout plan templates) and routine folders, so a training menu designed in conversation can be pushed directly into the Hevy app. Uses the official Hevy REST API directly.
+- **Hevy**: implemented — read: recent workouts, workout detail, body measurements, exercise template search, routine folder listing, routine listing, routine detail. Write: create/update routines (workout plan templates) and routine folders, so a training menu designed in conversation can be pushed directly into the Hevy app. Uses the official Hevy REST API directly. `lib/hevy/openapi-snapshot.json` is a checked-in copy of Hevy's public OpenAPI spec, kept as the source of truth for planning full API coverage — not all of it is implemented as MCP tools yet.
 
 ## Tools exposed
 
@@ -27,7 +27,7 @@ A personal remote MCP (Model Context Protocol) server that lets Claude read and 
 | `list_routine_folders` | read | List existing routine folders (id, title, index) to resolve a `folderId` by name |
 | `create_routine_folder` | write | Create a folder to organize routines |
 
-The `write` tools make real changes to the user's Hevy account (creating/replacing routines and folders). Their tool descriptions instruct the calling LLM to show the user the full planned content and get explicit confirmation before calling, and they require a `confirm: true` argument as a structural nudge in the same direction — but since that argument is set by the same LLM deciding whether to call the tool at all, it is not a guarantee of human confirmation, only a deliberate extra step. There is no scope separation between read and write tools at the authentication layer (see Authentication below) — any authenticated caller can invoke any tool.
+The `write` tools make real changes to the user's Hevy account (creating/replacing routines and folders). Every write tool takes a `confirm` argument that defaults to `false`: with `confirm` false or omitted, the tool is a no-op dry run — it never calls the Hevy API, and instead returns the exact payload it would have sent, wrapped as `{ dryRun: true, payload: {...} }`. Only `confirm: true` performs the real write. Tool descriptions also instruct the calling LLM to show the user the full planned content and get explicit confirmation before setting `confirm: true` — but since that argument is set by the same LLM deciding whether to call the tool at all, this instruction is not a guarantee of human confirmation on its own; the dry-run default is what actually prevents an accidental real write regardless of what the LLM does. There is no scope separation between read and write tools at the authentication layer (see Authentication below) — any authenticated caller can invoke any tool.
 
 ## Authentication
 
@@ -91,7 +91,7 @@ npm run test:e2e     # starts a real `next start` server and hits it over real H
 ```
 
 - **Unit** (`lib/*.test.ts`): bearer-token verification, OAuth code signing/PKCE/redirect-URI allowlisting (including the RFC 7636 PKCE test vector), Hevy routine request-body construction and validation (`@` rejection in notes, set-type enum, read-only field stripping, exercise-template search caching/pagination, routine-folder listing/pagination-walk, routine listing/folder-filtering/pagination-walk, routine detail read-shape unwrapping).
-- **Integration** (`test/integration/*.test.ts`): the real `app/api/mcp/route.ts` handler wired to real `lib/auth.ts`/`lib/hevy.ts` with only `fetch` mocked, including a full `search_exercise_templates` → `create_routine_folder` → `create_routine` × 3 walkthrough of a real 3-day/week training program; the real `/api/oauth/authorize` and `/api/oauth/token` route handlers; and the `.well-known` OAuth metadata routes.
+- **Integration** (`test/integration/*.test.ts`): the real `app/api/mcp/route.ts` handler wired to real `lib/auth.ts`/`lib/hevy.ts` with only `fetch` mocked, including a full `search_exercise_templates` → `create_routine_folder` → `create_routine` × 3 walkthrough of a real 3-day/week training program, and that every write tool's `confirm: false`/omitted dry-run path returns the exact would-be payload without ever calling `fetch`; the real `/api/oauth/authorize` and `/api/oauth/token` route handlers; and the `.well-known` OAuth metadata routes.
 - **E2E** (`test/e2e/*.e2e.test.mjs`): boots the production build and asserts over real HTTP — health check, 401 on bad/missing auth, `tools/list` returns all 10 tools, OAuth discovery metadata, and a full authorization-code + PKCE round trip that ends with a working access token against `/api/mcp`. Doesn't exercise real Hevy data (CI has no real credentials by design).
 
 ### Manually verifying Hevy write operations
@@ -100,7 +100,7 @@ CI never touches real Hevy data, so the routine-write tools (`create_routine`, `
 
 1. Set a real `HEVY_API_KEY` in `.env.local`, then run `vercel dev`.
 2. Call `search_exercise_templates` with a real query (e.g. via the smoke-test `curl` pattern above, using `tools/call` instead of `tools/list`) and confirm real candidates come back.
-3. Call `create_routine` with an obviously-throwaway title (e.g. `"fitness-mcp manual test — delete me"`) and `confirm: true`, and note the returned `id`.
+3. Call `create_routine` with an obviously-throwaway title (e.g. `"fitness-mcp manual test — delete me"`) and no `confirm` (or `confirm: false`) first, and check the returned `dryRun: true` payload looks right — nothing is written yet. Then call it again with `confirm: true`, and note the returned `id`.
 4. Open the Hevy app or web app and visually confirm the routine was created with the expected exercises, sets, reps, and weights.
 5. Check whether the returned `webUrl` (`https://hevy.com/routines/{id}`) actually opens the routine — it's an unverified best-effort guess at Hevy's URL pattern, not a documented API field. If it doesn't resolve, that's worth a follow-up to remove or fix the field.
 6. Call `get_routine_detail` with that `id` and confirm the returned exercises/sets/reps/weights match what you just created — this also confirms the `title` and `superset_id` fields actually come back on a real GET response (see the "unverified" comments on those fields in `lib/hevy.ts`). Call `list_routines` (with no `folderId`, then with the folder's id, then with `folderId: null`) and confirm the new routine shows up in the right buckets.

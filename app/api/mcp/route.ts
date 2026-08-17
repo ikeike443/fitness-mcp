@@ -12,6 +12,9 @@ import {
   listRoutineFolders,
   listRoutines,
   getRoutineDetail,
+  toCreateRoutineBody,
+  toUpdateRoutineBody,
+  toCreateRoutineFolderBody,
 } from "@/lib/hevy";
 
 export const maxDuration = 30;
@@ -91,11 +94,45 @@ const folderIdSchema = z
     "Routine folder ID to file this under, or null/omit for none — call list_routine_folders first to find an existing folder by title, or create_routine_folder to make a new one"
   );
 
+// Every write tool takes this same confirm flag, defaulting to false/dry-run
+// so the tool is safe to call speculatively while drafting content with the
+// user: confirm: false (or omitted) never touches Hevy — it only returns the
+// exact payload that *would* be sent, for the caller to show the user and
+// get explicit go-ahead on before calling again with confirm: true. This is
+// a belt-and-suspenders complement to the tool descriptions instructing the
+// calling LLM to confirm with the user first — since that instruction and
+// this flag are both ultimately under the same LLM's control, dry-run-by-
+// default is the part that actually prevents an accidental real write.
 const confirmSchema = z
-  .literal(true)
+  .boolean()
+  .optional()
   .describe(
-    "Set to true only after showing the user the full planned content (exercises, sets, reps, weights) in chat and getting their explicit go-ahead. Do not call this tool speculatively or before that confirmation."
+    'Set to true only after showing the user the full planned content (exercises, sets, reps, weights) in chat and getting their explicit go-ahead. Defaults to false: when false or omitted, nothing is written to Hevy — the tool instead returns the exact payload it would have sent, under a "dryRun": true wrapper, so you can show it to the user before asking them to approve. Never set this to true speculatively or as an intermediate step.'
   );
+
+// Shared shape for every write tool's dry-run response (confirm: false/
+// omitted) — wraps the real outgoing Hevy payload (built by the same
+// functions the live write path uses, so validation runs identically) with
+// a flag and instructions the calling LLM can act on directly.
+function dryRunPreview(payload: unknown) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify(
+          {
+            dryRun: true,
+            message:
+              "Nothing was written to Hevy. This is the exact payload that would be sent — show it to the user and call this tool again with confirm: true only after they explicitly approve it.",
+            payload,
+          },
+          null,
+          2
+        ),
+      },
+    ],
+  };
+}
 
 const handler = createMcpHandler(
   (server) => {
@@ -253,14 +290,17 @@ const handler = createMcpHandler(
       {
         title: "Create a Hevy routine",
         description:
-          "Create a new workout routine (template) in the user's Hevy account. THIS IS A REAL WRITE to the user's Hevy data. Before calling this tool, show the user the full planned routine (title, exercises, sets, reps, weights) in chat and get their explicit go-ahead — do not call it speculatively or as an intermediate step. Every exerciseTemplateId must come from a prior search_exercise_templates call; never guess one. Calling this tool twice with the same routine creates two separate duplicate routines (no automatic dedup) — if you're revising a routine created earlier in this conversation, call update_routine with its id instead of creating a new one.",
+          "Create a new workout routine (template) in the user's Hevy account. Without confirm: true this is a no-op dry run that only returns the payload that would be sent (see confirm below) — with confirm: true it IS A REAL WRITE to the user's Hevy data. Before setting confirm: true, show the user the full planned routine (title, exercises, sets, reps, weights) in chat and get their explicit go-ahead. Every exerciseTemplateId must come from a prior search_exercise_templates call; never guess one. Calling this tool twice with the same routine creates two separate duplicate routines (no automatic dedup) — if you're revising a routine created earlier in this conversation, call update_routine with its id instead of creating a new one.",
         inputSchema: z.object({
           ...routineBodySchema,
           folderId: folderIdSchema,
           confirm: confirmSchema,
         }),
       },
-      async ({ title, folderId, notes, exercises }) => {
+      async ({ title, folderId, notes, exercises, confirm }) => {
+        if (!confirm) {
+          return dryRunPreview(toCreateRoutineBody({ title, folderId, notes, exercises }));
+        }
         const routine = await createRoutine({ title, folderId, notes, exercises });
         return {
           content: [{ type: "text", text: JSON.stringify(routine, null, 2) }],
@@ -273,7 +313,7 @@ const handler = createMcpHandler(
       {
         title: "Update a Hevy routine",
         description:
-          "Replace an existing Hevy routine's title/notes/exercises entirely (full overwrite, not a partial patch — omitted exercises are removed). THIS IS A REAL WRITE. Show the user the complete new routine content and get explicit confirmation before calling. Prefer this over create_routine whenever you're revising a routine that already exists, to avoid accumulating duplicates. Note: Hevy's update endpoint cannot change which folder a routine is filed under — folder assignment is set only at creation (create_routine's folderId); to move an existing routine to a different folder, recreate it there.",
+          "Replace an existing Hevy routine's title/notes/exercises entirely (full overwrite, not a partial patch — omitted exercises are removed). Without confirm: true this is a no-op dry run that only returns the payload that would be sent — with confirm: true IT IS A REAL WRITE. Show the user the complete new routine content and get explicit confirmation before setting confirm: true. Prefer this over create_routine whenever you're revising a routine that already exists, to avoid accumulating duplicates. Note: Hevy's update endpoint cannot change which folder a routine is filed under — folder assignment is set only at creation (create_routine's folderId); to move an existing routine to a different folder, recreate it there.",
         inputSchema: z.object({
           routineId: z
             .string()
@@ -285,7 +325,10 @@ const handler = createMcpHandler(
           confirm: confirmSchema,
         }),
       },
-      async ({ routineId, title, notes, exercises }) => {
+      async ({ routineId, title, notes, exercises, confirm }) => {
+        if (!confirm) {
+          return dryRunPreview(toUpdateRoutineBody({ title, notes, exercises }));
+        }
         const routine = await updateRoutine(routineId, { title, notes, exercises });
         return {
           content: [{ type: "text", text: JSON.stringify(routine, null, 2) }],
@@ -314,13 +357,16 @@ const handler = createMcpHandler(
       {
         title: "Create a Hevy routine folder",
         description:
-          "Create a new folder in the user's Hevy account to organize routines (e.g. by program or training day). THIS IS A REAL WRITE. Confirm the folder name with the user before calling. Returns the folder's id, which can be passed as folderId to create_routine (update_routine has no folderId — Hevy cannot change a routine's folder after creation). Call list_routine_folders first to check whether a suitable folder already exists.",
+          "Create a new folder in the user's Hevy account to organize routines (e.g. by program or training day). Without confirm: true this is a no-op dry run that only returns the payload that would be sent — with confirm: true IT IS A REAL WRITE. Confirm the folder name with the user before setting confirm: true. Returns the folder's id, which can be passed as folderId to create_routine (update_routine has no folderId — Hevy cannot change a routine's folder after creation). Call list_routine_folders first to check whether a suitable folder already exists.",
         inputSchema: z.object({
           title: z.string().min(1).describe("Folder name as it will appear in Hevy"),
           confirm: confirmSchema,
         }),
       },
-      async ({ title }) => {
+      async ({ title, confirm }) => {
+        if (!confirm) {
+          return dryRunPreview(toCreateRoutineFolderBody(title));
+        }
         const folder = await createRoutineFolder(title);
         return {
           content: [{ type: "text", text: JSON.stringify(folder, null, 2) }],

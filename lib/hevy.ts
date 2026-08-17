@@ -295,7 +295,15 @@ function buildRoutineFields(input: UpdateRoutineInput) {
   };
 }
 
-function toCreateRoutineBody(input: CreateRoutineInput) {
+// Exported (not just used internally by createRoutine/updateRoutine below) so
+// the MCP layer can build and return the exact outgoing Hevy payload as a
+// dry-run preview when a write tool is called with confirm: false/omitted —
+// see the confirm-dry-run handling in app/api/mcp/route.ts. Reusing the real
+// body-builder means the preview also runs the same validation
+// (assertValidNotes/assertValidSetType via buildRoutineFields) that a real
+// write would, so a dry-run call surfaces payload problems before anything
+// is actually sent to Hevy.
+export function toCreateRoutineBody(input: CreateRoutineInput) {
   return {
     routine: {
       ...buildRoutineFields(input),
@@ -304,7 +312,7 @@ function toCreateRoutineBody(input: CreateRoutineInput) {
   };
 }
 
-function toUpdateRoutineBody(input: UpdateRoutineInput) {
+export function toUpdateRoutineBody(input: UpdateRoutineInput) {
   return { routine: buildRoutineFields(input) };
 }
 
@@ -449,6 +457,12 @@ export async function listRoutineFolders() {
   return all.map((f) => ({ id: f.id, title: f.title, index: f.index }));
 }
 
+// Exported for the same dry-run-preview reason as toCreateRoutineBody /
+// toUpdateRoutineBody above.
+export function toCreateRoutineFolderBody(title: string) {
+  return { routine_folder: { title } };
+}
+
 export async function createRoutineFolder(title: string) {
   // POST /v1/routine_folders wraps its response as { routine_folder: {...} }
   // (unlike GET /v1/routine_folders/{id}, which returns it unwrapped). This
@@ -460,7 +474,7 @@ export async function createRoutineFolder(title: string) {
     "/v1/routine_folders",
     {
       method: "POST",
-      body: { routine_folder: { title } },
+      body: toCreateRoutineFolderBody(title),
     }
   );
   const folder = data.routine_folder;
