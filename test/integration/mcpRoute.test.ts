@@ -58,44 +58,50 @@ describe("POST /api/mcp auth", () => {
 });
 
 describe("POST /api/mcp tools/list", () => {
-  it("lists all 10 tools", async () => {
+  it("lists all 15 tools", async () => {
     const { json } = await callMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, AUTH_HEADER);
     const names = json.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual([
       "create_routine",
       "create_routine_folder",
+      "create_workout",
       "get_body_measurements",
-      "get_recent_workouts",
       "get_routine_detail",
+      "get_user_info",
+      "get_workout_count",
       "get_workout_detail",
       "list_routine_folders",
       "list_routines",
+      "list_workout_events",
+      "list_workouts",
       "search_exercise_templates",
       "update_routine",
+      "update_workout",
     ]);
   });
 });
 
 describe("POST /api/mcp tools/call — Hevy (real lib/hevy.ts, fetch mocked)", () => {
-  it("get_recent_workouts returns summarized workouts from the Hevy API response", async () => {
+  it("list_workouts returns paginated summarized workouts from the Hevy API response", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        expect(url).toContain("api.hevyapp.com/v1/workouts");
+        expect(url).toBe("https://api.hevyapp.com/v1/workouts?page=1&pageSize=5");
         return new Response(
           JSON.stringify({
             page: 1,
-            page_count: 1,
+            page_count: 3,
             workouts: [
               {
                 id: "w1",
                 title: "Push day",
+                routine_id: "routine-1",
                 description: null,
                 start_time: "2026-08-01T10:00:00Z",
                 end_time: "2026-08-01T11:00:00Z",
                 updated_at: "2026-08-01T11:00:00Z",
                 created_at: "2026-08-01T11:00:00Z",
-                exercises: [{ index: 0, title: "Bench Press", notes: null, exercise_template_id: "x", sets: [] }],
+                exercises: [{ index: 0, title: "Bench Press", notes: null, exercise_template_id: "x", supersets_id: null, sets: [] }],
               },
             ],
           }),
@@ -105,21 +111,49 @@ describe("POST /api/mcp tools/call — Hevy (real lib/hevy.ts, fetch mocked)", (
     );
 
     const { json } = await callMcp(
-      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "get_recent_workouts", arguments: {} } },
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "list_workouts", arguments: {} } },
       AUTH_HEADER
     );
 
-    const workouts = JSON.parse(json.result.content[0].text);
-    expect(workouts).toEqual([
+    const result = JSON.parse(json.result.content[0].text);
+    expect(result).toEqual({
+      page: 1,
+      pageCount: 3,
+      workouts: [
+        {
+          id: "w1",
+          title: "Push day",
+          routineId: "routine-1",
+          startTime: "2026-08-01T10:00:00Z",
+          endTime: "2026-08-01T11:00:00Z",
+          exerciseCount: 1,
+          exercises: ["Bench Press"],
+        },
+      ],
+    });
+  });
+
+  it("list_workouts passes page/pageSize through to the Hevy API", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/workouts?page=2&pageSize=3");
+        return new Response(
+          JSON.stringify({ page: 2, page_count: 5, workouts: [] }),
+          { status: 200 }
+        );
+      })
+    );
+
+    await callMcp(
       {
-        id: "w1",
-        title: "Push day",
-        startTime: "2026-08-01T10:00:00Z",
-        endTime: "2026-08-01T11:00:00Z",
-        exerciseCount: 1,
-        exercises: ["Bench Press"],
+        jsonrpc: "2.0",
+        id: 21,
+        method: "tools/call",
+        params: { name: "list_workouts", arguments: { page: 2, pageSize: 3 } },
       },
-    ]);
+      AUTH_HEADER
+    );
   });
 
   it("surfaces a Hevy API error as a tool error instead of crashing the server", async () => {
@@ -129,7 +163,7 @@ describe("POST /api/mcp tools/call — Hevy (real lib/hevy.ts, fetch mocked)", (
     );
 
     const { status, json } = await callMcp(
-      { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "get_recent_workouts", arguments: {} } },
+      { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "list_workouts", arguments: {} } },
       AUTH_HEADER
     );
 
@@ -170,6 +204,311 @@ describe("POST /api/mcp tools/call — Hevy (real lib/hevy.ts, fetch mocked)", (
     expect(measurements).toEqual([
       { date: "2026-08-01", weightKg: 70.5, fatPercent: 15.2 },
     ]);
+  });
+
+  it("get_workout_count GETs /v1/workouts/count and returns the count", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/workouts/count");
+        return new Response(JSON.stringify({ workout_count: 7 }), { status: 200 });
+      })
+    );
+
+    const { json } = await callMcp(
+      { jsonrpc: "2.0", id: 22, method: "tools/call", params: { name: "get_workout_count", arguments: {} } },
+      AUTH_HEADER
+    );
+
+    expect(JSON.parse(json.result.content[0].text)).toEqual({ count: 7 });
+  });
+
+  it("list_workout_events returns updated/deleted events since the given timestamp", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toBe(
+          "https://api.hevyapp.com/v1/workouts/events?page=1&pageSize=5&since=2026-08-01T00%3A00%3A00Z"
+        );
+        return new Response(
+          JSON.stringify({
+            page: 1,
+            page_count: 1,
+            events: [{ type: "deleted", id: "workout-9", deleted_at: "2026-08-02T00:00:00Z" }],
+          }),
+          { status: 200 }
+        );
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 23,
+        method: "tools/call",
+        params: { name: "list_workout_events", arguments: { since: "2026-08-01T00:00:00Z" } },
+      },
+      AUTH_HEADER
+    );
+
+    expect(JSON.parse(json.result.content[0].text)).toEqual({
+      page: 1,
+      pageCount: 1,
+      events: [{ type: "deleted", id: "workout-9", deletedAt: "2026-08-02T00:00:00Z" }],
+    });
+  });
+
+  it("get_workout_detail GETs /v1/workouts/{id} and returns full exercise/set detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/workouts/workout-1");
+        return new Response(
+          JSON.stringify({
+            id: "workout-1",
+            title: "Push day",
+            routine_id: null,
+            description: null,
+            start_time: "2026-08-01T10:00:00Z",
+            end_time: "2026-08-01T11:00:00Z",
+            updated_at: "2026-08-01T11:00:00Z",
+            created_at: "2026-08-01T11:00:00Z",
+            exercises: [
+              {
+                index: 0,
+                title: "Bench Press (Barbell)",
+                notes: null,
+                exercise_template_id: "tmpl-bench",
+                supersets_id: null,
+                sets: [
+                  {
+                    index: 0,
+                    type: "normal",
+                    weight_kg: 80,
+                    reps: 8,
+                    distance_meters: null,
+                    duration_seconds: null,
+                    rpe: null,
+                    custom_metric: null,
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200 }
+        );
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 24,
+        method: "tools/call",
+        params: { name: "get_workout_detail", arguments: { workoutId: "workout-1" } },
+      },
+      AUTH_HEADER
+    );
+
+    expect(JSON.parse(json.result.content[0].text)).toEqual({
+      id: "workout-1",
+      title: "Push day",
+      routineId: null,
+      description: null,
+      startTime: "2026-08-01T10:00:00Z",
+      endTime: "2026-08-01T11:00:00Z",
+      exercises: [
+        {
+          exerciseTemplateId: "tmpl-bench",
+          title: "Bench Press (Barbell)",
+          notes: null,
+          supersetId: null,
+          sets: [
+            {
+              type: "normal",
+              weightKg: 80,
+              reps: 8,
+              distanceMeters: null,
+              durationSeconds: null,
+              rpe: null,
+              customMetric: null,
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("get_user_info GETs /v1/user/info and returns id/name/profileUrl", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/user/info");
+        return new Response(
+          JSON.stringify({ data: { id: "user-1", name: "Jane Doe", url: "https://hevy.com/user/jane" } }),
+          { status: 200 }
+        );
+      })
+    );
+
+    const { json } = await callMcp(
+      { jsonrpc: "2.0", id: 25, method: "tools/call", params: { name: "get_user_info", arguments: {} } },
+      AUTH_HEADER
+    );
+
+    expect(JSON.parse(json.result.content[0].text)).toEqual({
+      id: "user-1",
+      name: "Jane Doe",
+      profileUrl: "https://hevy.com/user/jane",
+    });
+  });
+});
+
+describe("POST /api/mcp tools/call — Hevy workouts write (real lib/hevy.ts, fetch mocked)", () => {
+  const WORKOUT_INPUT = {
+    title: "Push day",
+    startTime: "2026-08-01T10:00:00Z",
+    endTime: "2026-08-01T11:00:00Z",
+    exercises: [{ exerciseTemplateId: "tmpl-bench", sets: [{ type: "normal", reps: 8, weightKg: 80 }] }],
+  };
+
+  const WORKOUT_API_RESPONSE = {
+    id: "workout-1",
+    title: "Push day",
+    routine_id: null,
+    description: null,
+    start_time: "2026-08-01T10:00:00Z",
+    end_time: "2026-08-01T11:00:00Z",
+    updated_at: "2026-08-01T11:00:00Z",
+    created_at: "2026-08-01T11:00:00Z",
+    exercises: [],
+  };
+
+  it("create_workout returns a dry-run payload preview without touching the Hevy API when confirm is not true", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { status, json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 26,
+        method: "tools/call",
+        params: { name: "create_workout", arguments: WORKOUT_INPUT },
+      },
+      AUTH_HEADER
+    );
+
+    expect(status).toBe(200);
+    expect(json.result.isError).toBeUndefined();
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(preview.payload).toEqual({
+      workout: {
+        title: "Push day",
+        description: null,
+        start_time: "2026-08-01T10:00:00Z",
+        end_time: "2026-08-01T11:00:00Z",
+        is_private: false,
+        exercises: [
+          {
+            exercise_template_id: "tmpl-bench",
+            superset_id: null,
+            notes: null,
+            sets: [
+              {
+                type: "normal",
+                weight_kg: 80,
+                reps: 8,
+                distance_meters: null,
+                duration_seconds: null,
+                rpe: null,
+                custom_metric: null,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("create_workout POSTs the workout to Hevy and returns its id when confirmed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/workouts");
+        expect(init.method).toBe("POST");
+        return new Response(JSON.stringify(WORKOUT_API_RESPONSE), { status: 201 });
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 27,
+        method: "tools/call",
+        params: { name: "create_workout", arguments: { ...WORKOUT_INPUT, confirm: true } },
+      },
+      AUTH_HEADER
+    );
+
+    expect(JSON.parse(json.result.content[0].text)).toEqual({
+      id: "workout-1",
+      title: "Push day",
+      routineId: null,
+      startTime: "2026-08-01T10:00:00Z",
+      endTime: "2026-08-01T11:00:00Z",
+      exerciseCount: 0,
+    });
+  });
+
+  it("update_workout returns a dry-run payload preview without touching the Hevy API when confirm is not true", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 28,
+        method: "tools/call",
+        params: {
+          name: "update_workout",
+          arguments: { workoutId: "workout-1", ...WORKOUT_INPUT },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("update_workout PUTs to the workout's id when confirmed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/workouts/workout-1");
+        expect(init.method).toBe("PUT");
+        return new Response(JSON.stringify(WORKOUT_API_RESPONSE), { status: 200 });
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 29,
+        method: "tools/call",
+        params: {
+          name: "update_workout",
+          arguments: { workoutId: "workout-1", ...WORKOUT_INPUT, confirm: true },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const workout = JSON.parse(json.result.content[0].text);
+    expect(workout.id).toBe("workout-1");
   });
 });
 

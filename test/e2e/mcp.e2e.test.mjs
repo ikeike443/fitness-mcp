@@ -97,7 +97,7 @@ test("rejects requests with the wrong bearer token", async () => {
   assert.equal(res.status, 401);
 });
 
-test("lists all 10 tools with a valid bearer token", async () => {
+test("lists all 15 tools with a valid bearer token", async () => {
   const res = await fetch(`${BASE_URL}/api/mcp`, {
     method: "POST",
     headers: {
@@ -118,14 +118,19 @@ test("lists all 10 tools with a valid bearer token", async () => {
   assert.deepEqual(names, [
     "create_routine",
     "create_routine_folder",
+    "create_workout",
     "get_body_measurements",
-    "get_recent_workouts",
     "get_routine_detail",
+    "get_user_info",
+    "get_workout_count",
     "get_workout_detail",
     "list_routine_folders",
     "list_routines",
+    "list_workout_events",
+    "list_workouts",
     "search_exercise_templates",
     "update_routine",
+    "update_workout",
   ]);
 });
 
