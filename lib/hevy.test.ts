@@ -21,6 +21,8 @@ import {
   getBodyMeasurementByDate,
   createBodyMeasurement,
   updateBodyMeasurement,
+  getRoutineFolderDetail,
+  getExerciseHistory,
 } from "./hevy";
 import type {
   CreateRoutineInput,
@@ -1724,6 +1726,102 @@ describe("updateBodyMeasurement", () => {
     await expect(updateBodyMeasurement("2026-08-01", { weightKg: 81 })).rejects.toThrow(
       /No measurement found/
     );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getRoutineFolderDetail", () => {
+  it("GETs /v1/routine_folders/{id} (unwrapped) and returns full detail", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/routine_folders/42");
+      return jsonResponse({
+        id: 42,
+        title: "Push Pull",
+        index: 1,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-02T00:00:00Z",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getRoutineFolderDetail(42);
+    expect(result).toEqual({
+      id: 42,
+      title: "Push Pull",
+      index: 1,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-02T00:00:00Z",
+    });
+  });
+});
+
+describe("getExerciseHistory", () => {
+  it("GETs /v1/exercise_history/{id} with no query params by default and maps every field", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/exercise_history/tmpl-bench");
+      return jsonResponse({
+        exercise_history: [
+          {
+            workout_id: "workout-1",
+            workout_title: "Push day",
+            workout_start_time: "2026-08-01T10:00:00Z",
+            workout_end_time: "2026-08-01T11:00:00Z",
+            exercise_template_id: "tmpl-bench",
+            weight_kg: 80,
+            reps: 8,
+            distance_meters: null,
+            duration_seconds: null,
+            rpe: 8.5,
+            custom_metric: null,
+            set_type: "normal",
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getExerciseHistory("tmpl-bench");
+    expect(result).toEqual([
+      {
+        workoutId: "workout-1",
+        workoutTitle: "Push day",
+        workoutStartTime: "2026-08-01T10:00:00Z",
+        workoutEndTime: "2026-08-01T11:00:00Z",
+        setType: "normal",
+        weightKg: 80,
+        reps: 8,
+        distanceMeters: null,
+        durationSeconds: null,
+        rpe: 8.5,
+        customMetric: null,
+      },
+    ]);
+  });
+
+  it("passes startDate/endDate through as start_date/end_date query params when given", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe(
+        "https://api.hevyapp.com/v1/exercise_history/tmpl-bench?start_date=2026-01-01T00%3A00%3A00Z&end_date=2026-12-31T23%3A59%3A59Z"
+      );
+      return jsonResponse({ exercise_history: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getExerciseHistory("tmpl-bench", {
+      startDate: "2026-01-01T00:00:00Z",
+      endDate: "2026-12-31T23:59:59Z",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("URL-encodes an exerciseTemplateId containing special characters", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/exercise_history/foo%2Fbar..");
+      return jsonResponse({ exercise_history: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getExerciseHistory("foo/bar..");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

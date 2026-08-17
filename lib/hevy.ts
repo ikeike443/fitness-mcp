@@ -881,6 +881,23 @@ export async function listRoutineFolders() {
   return all.map((f) => ({ id: f.id, title: f.title, index: f.index }));
 }
 
+// Unlike listRoutineFolders' summary (id/title/index only, since its job is
+// letting a caller resolve a folderId by title from the full list),
+// get_routine_folder_detail also surfaces created_at/updated_at — the point
+// of a single-folder lookup is the extra detail the list view leaves out.
+export async function getRoutineFolderDetail(folderId: number | string) {
+  const f = await hevyFetch<HevyRoutineFolder>(
+    `/v1/routine_folders/${encodeURIComponent(String(folderId))}`
+  );
+  return {
+    id: f.id,
+    title: f.title,
+    index: f.index,
+    createdAt: f.created_at,
+    updatedAt: f.updated_at,
+  };
+}
+
 // Exported for the same dry-run-preview reason as toCreateRoutineBody /
 // toUpdateRoutineBody above.
 export function toCreateRoutineFolderBody(title: string) {
@@ -1034,6 +1051,61 @@ export async function getExerciseTemplateDetail(exerciseTemplateId: string) {
     secondaryMuscleGroups: t.secondary_muscle_groups,
     isCustom: t.is_custom,
   };
+}
+
+// --- Exercise history -------------------------------------------------------
+//
+// GET /v1/exercise_history/{exerciseTemplateId}: every set ever logged for
+// one exercise across all past workouts, optionally date-bounded — useful
+// for progression/PR questions ("what's my bench press history look like")
+// without walking every workout via list_workouts/get_workout_detail
+// yourself. Read-only, no pagination in the spec (returns the full matching
+// set unbounded — narrow with startDate/endDate if that's ever a problem in
+// practice).
+
+interface HevyExerciseHistoryEntry {
+  workout_id: string;
+  workout_title: string;
+  workout_start_time: string;
+  workout_end_time: string;
+  exercise_template_id: string;
+  weight_kg: number | null;
+  reps: number | null;
+  distance_meters: number | null;
+  duration_seconds: number | null;
+  rpe: number | null;
+  custom_metric: number | null;
+  set_type: string;
+}
+
+interface HevyExerciseHistoryResponse {
+  exercise_history: HevyExerciseHistoryEntry[];
+}
+
+export async function getExerciseHistory(
+  exerciseTemplateId: string,
+  opts: { startDate?: string; endDate?: string } = {}
+) {
+  const params = new URLSearchParams();
+  if (opts.startDate) params.set("start_date", opts.startDate);
+  if (opts.endDate) params.set("end_date", opts.endDate);
+  const query = params.toString();
+  const data = await hevyFetch<HevyExerciseHistoryResponse>(
+    `/v1/exercise_history/${encodeURIComponent(exerciseTemplateId)}${query ? `?${query}` : ""}`
+  );
+  return data.exercise_history.map((e) => ({
+    workoutId: e.workout_id,
+    workoutTitle: e.workout_title,
+    workoutStartTime: e.workout_start_time,
+    workoutEndTime: e.workout_end_time,
+    setType: e.set_type,
+    weightKg: e.weight_kg,
+    reps: e.reps,
+    distanceMeters: e.distance_meters,
+    durationSeconds: e.duration_seconds,
+    rpe: e.rpe,
+    customMetric: e.custom_metric,
+  }));
 }
 
 // --- Custom exercise template creation ------------------------------------
