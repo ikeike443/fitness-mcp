@@ -10,6 +10,9 @@ import {
   updateWorkout,
   getUserInfo,
   getBodyMeasurements,
+  getBodyMeasurementByDate,
+  createBodyMeasurement,
+  updateBodyMeasurement,
   searchExerciseTemplates,
   getExerciseTemplateDetail,
   createCustomExerciseTemplate,
@@ -25,6 +28,8 @@ import {
   toCreateWorkoutBody,
   toUpdateWorkoutBody,
   toCreateCustomExerciseTemplateBody,
+  toCreateBodyMeasurementBody,
+  toUpdateBodyMeasurementBody,
 } from "@/lib/hevy";
 
 export const maxDuration = 30;
@@ -242,6 +247,81 @@ const muscleGroupSchema = z.enum([
   "full_body",
   "other",
 ]);
+
+// Shared field set for create_body_measurement/update_body_measurement
+// below — every field is optional/nullable except create's date. Hevy's own
+// field naming is inconsistent about units (neck/shoulder/chest/bicep/
+// forearm are suffixed "cm", abdomen/waist/hips/thigh/calf are not, despite
+// example values in the same cm-like range) — described here as "cm" for
+// all of them since that's the best available guess, but flagged as such
+// rather than stated as fact.
+const bodyMeasurementFieldsSchema = {
+  weightKg: z.number().nullable().optional().describe("Body weight in kg, or null/omit"),
+  leanMassKg: z.number().nullable().optional().describe("Lean body mass in kg, or null/omit"),
+  fatPercent: z.number().nullable().optional().describe("Body fat percentage, or null/omit"),
+  neckCm: z.number().nullable().optional().describe("Neck circumference in cm, or null/omit"),
+  shoulderCm: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Shoulder circumference in cm, or null/omit"),
+  chestCm: z.number().nullable().optional().describe("Chest circumference in cm, or null/omit"),
+  leftBicepCm: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Left bicep circumference in cm, or null/omit"),
+  rightBicepCm: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Right bicep circumference in cm, or null/omit"),
+  leftForearmCm: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Left forearm circumference in cm, or null/omit"),
+  rightForearmCm: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Right forearm circumference in cm, or null/omit"),
+  abdomen: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Abdomen circumference (cm, presumed — see field-naming note above), or null/omit"),
+  waist: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Waist circumference (cm, presumed — see field-naming note above), or null/omit"),
+  hips: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Hip circumference (cm, presumed — see field-naming note above), or null/omit"),
+  leftThigh: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Left thigh circumference (cm, presumed), or null/omit"),
+  rightThigh: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Right thigh circumference (cm, presumed), or null/omit"),
+  leftCalf: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Left calf circumference (cm, presumed), or null/omit"),
+  rightCalf: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Right calf circumference (cm, presumed), or null/omit"),
+};
 
 // Every write tool takes this same confirm flag, defaulting to false/dry-run
 // so the tool is safe to call speculatively while drafting content with the
@@ -469,6 +549,149 @@ const handler = createMcpHandler(
           content: [
             { type: "text", text: JSON.stringify(measurements, null, 2) },
           ],
+        };
+      }
+    );
+
+    server.registerTool(
+      "get_body_measurement_by_date",
+      {
+        title: "Get Hevy body measurement by date",
+        description:
+          "Get the single body measurement entry — weight, body fat %, and every tracked circumference field — logged for a specific date. Use this instead of get_body_measurements when you need the full detail for one day; get_body_measurements only returns weight and body fat % for recent entries.",
+        inputSchema: z.object({
+          date: z.string().min(1).describe("Date in YYYY-MM-DD format"),
+        }),
+      },
+      async ({ date }) => {
+        const measurement = await getBodyMeasurementByDate(date);
+        return {
+          content: [{ type: "text", text: JSON.stringify(measurement, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "create_body_measurement",
+      {
+        title: "Log a new Hevy body measurement",
+        description:
+          "Log a new body measurement entry for a specific date — weight, body fat %, and/or any tracked circumference measurements. Hevy rejects this with a 409 if an entry for that date already exists; call update_body_measurement instead in that case. Without confirm: true this is a no-op dry run that only returns the payload that would be sent — with confirm: true IT IS A REAL WRITE. Show the user the full planned entry and get explicit confirmation before setting confirm: true. Returns the entry as read back from Hevy after the write, not just an echo of what was sent, since Hevy's write response has no body to confirm against.",
+        inputSchema: z.object({
+          date: z.string().min(1).describe("Date in YYYY-MM-DD format"),
+          ...bodyMeasurementFieldsSchema,
+          confirm: confirmSchema,
+        }),
+      },
+      async ({
+        date,
+        weightKg,
+        leanMassKg,
+        fatPercent,
+        neckCm,
+        shoulderCm,
+        chestCm,
+        leftBicepCm,
+        rightBicepCm,
+        leftForearmCm,
+        rightForearmCm,
+        abdomen,
+        waist,
+        hips,
+        leftThigh,
+        rightThigh,
+        leftCalf,
+        rightCalf,
+        confirm,
+      }) => {
+        const input = {
+          date,
+          weightKg,
+          leanMassKg,
+          fatPercent,
+          neckCm,
+          shoulderCm,
+          chestCm,
+          leftBicepCm,
+          rightBicepCm,
+          leftForearmCm,
+          rightForearmCm,
+          abdomen,
+          waist,
+          hips,
+          leftThigh,
+          rightThigh,
+          leftCalf,
+          rightCalf,
+        };
+        if (!confirm) {
+          return dryRunPreview(toCreateBodyMeasurementBody(input));
+        }
+        const measurement = await createBodyMeasurement(input);
+        return {
+          content: [{ type: "text", text: JSON.stringify(measurement, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "update_body_measurement",
+      {
+        title: "Update a Hevy body measurement",
+        description:
+          "Replace an existing body measurement entry for a specific date entirely — Hevy sets every omitted field to null, it does not merge with the existing entry. Call get_body_measurement_by_date first if you don't already know the entry's exact current values, since any field you omit here will be cleared, not left alone. Without confirm: true this is a no-op dry run that only returns the payload that would be sent — with confirm: true IT IS A REAL WRITE. Show the user the complete new content and get explicit confirmation before setting confirm: true. Returns the entry as read back from Hevy after the write, not just an echo of what was sent, since Hevy's write response has no body to confirm against.",
+        inputSchema: z.object({
+          date: z.string().min(1).describe("Date (YYYY-MM-DD) of the existing entry to overwrite"),
+          ...bodyMeasurementFieldsSchema,
+          confirm: confirmSchema,
+        }),
+      },
+      async ({
+        date,
+        weightKg,
+        leanMassKg,
+        fatPercent,
+        neckCm,
+        shoulderCm,
+        chestCm,
+        leftBicepCm,
+        rightBicepCm,
+        leftForearmCm,
+        rightForearmCm,
+        abdomen,
+        waist,
+        hips,
+        leftThigh,
+        rightThigh,
+        leftCalf,
+        rightCalf,
+        confirm,
+      }) => {
+        const input = {
+          weightKg,
+          leanMassKg,
+          fatPercent,
+          neckCm,
+          shoulderCm,
+          chestCm,
+          leftBicepCm,
+          rightBicepCm,
+          leftForearmCm,
+          rightForearmCm,
+          abdomen,
+          waist,
+          hips,
+          leftThigh,
+          rightThigh,
+          leftCalf,
+          rightCalf,
+        };
+        if (!confirm) {
+          return dryRunPreview(toUpdateBodyMeasurementBody(input));
+        }
+        const measurement = await updateBodyMeasurement(date, input);
+        return {
+          content: [{ type: "text", text: JSON.stringify(measurement, null, 2) }],
         };
       }
     );

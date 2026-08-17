@@ -27,7 +27,18 @@ async function hevyFetch<T>(
   if (!res.ok) {
     throw new Error(`Hevy API error ${res.status}: ${await res.text()}`);
   }
-  return res.json() as Promise<T>;
+  // Every endpoint used elsewhere in this file returns a non-empty JSON body
+  // on success, so res.json() was fine there. Hevy's spec documents
+  // POST/PUT .../body_measurements(/{date}) as returning a 200 with no
+  // response body at all (unlike every other write endpoint in this API) —
+  // res.json() would throw on that empty body before the caller ever got a
+  // chance to do anything else, so read as text first and only parse if
+  // there's something to parse. Callers that need the write to report back
+  // real data (see createBodyMeasurement/updateBodyMeasurement below) do a
+  // follow-up read instead of relying on this return value.
+  const text = await res.text();
+  if (text === "") return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 // --- Shared write-validation helpers -------------------------------------
@@ -154,6 +165,33 @@ interface HevyBodyMeasurementsResponse {
   page: number;
   page_count: number;
   body_measurements: HevyBodyMeasurement[];
+}
+
+// Full field set for a single body measurement entry — every field but
+// "date" is nullable. Hevy's own field naming is inconsistent about units:
+// neck/shoulder/chest/bicep/forearm are suffixed "_cm", but
+// abdomen/waist/hips/thigh/calf are not (despite example values in the same
+// cm-like range) — that's Hevy's spec as documented, not a mapping mistake
+// here.
+interface HevyBodyMeasurementDetail {
+  date: string;
+  weight_kg: number | null;
+  lean_mass_kg: number | null;
+  fat_percent: number | null;
+  neck_cm: number | null;
+  shoulder_cm: number | null;
+  chest_cm: number | null;
+  left_bicep_cm: number | null;
+  right_bicep_cm: number | null;
+  left_forearm_cm: number | null;
+  right_forearm_cm: number | null;
+  abdomen: number | null;
+  waist: number | null;
+  hips: number | null;
+  left_thigh: number | null;
+  right_thigh: number | null;
+  left_calf: number | null;
+  right_calf: number | null;
 }
 
 function summarizeWorkout(w: HevyWorkout) {
@@ -394,6 +432,137 @@ export async function getBodyMeasurements(limit = 10) {
     weightKg: m.weight_kg,
     fatPercent: m.fat_percent,
   }));
+}
+
+function toBodyMeasurementOutput(m: HevyBodyMeasurementDetail) {
+  return {
+    date: m.date,
+    weightKg: m.weight_kg,
+    leanMassKg: m.lean_mass_kg,
+    fatPercent: m.fat_percent,
+    neckCm: m.neck_cm,
+    shoulderCm: m.shoulder_cm,
+    chestCm: m.chest_cm,
+    leftBicepCm: m.left_bicep_cm,
+    rightBicepCm: m.right_bicep_cm,
+    leftForearmCm: m.left_forearm_cm,
+    rightForearmCm: m.right_forearm_cm,
+    abdomen: m.abdomen,
+    waist: m.waist,
+    hips: m.hips,
+    leftThigh: m.left_thigh,
+    rightThigh: m.right_thigh,
+    leftCalf: m.left_calf,
+    rightCalf: m.right_calf,
+  };
+}
+
+export async function getBodyMeasurementByDate(date: string) {
+  const m = await hevyFetch<HevyBodyMeasurementDetail>(
+    `/v1/body_measurements/${encodeURIComponent(date)}`
+  );
+  return toBodyMeasurementOutput(m);
+}
+
+// --- Body measurement write support ---------------------------------------
+
+export interface BodyMeasurementFields {
+  weightKg?: number | null;
+  leanMassKg?: number | null;
+  fatPercent?: number | null;
+  neckCm?: number | null;
+  shoulderCm?: number | null;
+  chestCm?: number | null;
+  leftBicepCm?: number | null;
+  rightBicepCm?: number | null;
+  leftForearmCm?: number | null;
+  rightForearmCm?: number | null;
+  abdomen?: number | null;
+  waist?: number | null;
+  hips?: number | null;
+  leftThigh?: number | null;
+  rightThigh?: number | null;
+  leftCalf?: number | null;
+  rightCalf?: number | null;
+}
+
+export interface CreateBodyMeasurementInput extends BodyMeasurementFields {
+  date: string;
+}
+
+// PUT /v1/body_measurements/{date} has no "date" field in its body at all —
+// the date is only the path param — and its own spec summary says "All
+// fields are overwritten; omitted fields are set to null" (a genuine
+// destructive full-replace, not a merge/patch), unlike PUT /v1/routines/{id}
+// which merely omits one field (folder_id). So UpdateBodyMeasurementInput is
+// just the shared fields, no date.
+export type UpdateBodyMeasurementInput = BodyMeasurementFields;
+
+function buildBodyMeasurementFields(input: BodyMeasurementFields) {
+  return {
+    weight_kg: input.weightKg ?? null,
+    lean_mass_kg: input.leanMassKg ?? null,
+    fat_percent: input.fatPercent ?? null,
+    neck_cm: input.neckCm ?? null,
+    shoulder_cm: input.shoulderCm ?? null,
+    chest_cm: input.chestCm ?? null,
+    left_bicep_cm: input.leftBicepCm ?? null,
+    right_bicep_cm: input.rightBicepCm ?? null,
+    left_forearm_cm: input.leftForearmCm ?? null,
+    right_forearm_cm: input.rightForearmCm ?? null,
+    abdomen: input.abdomen ?? null,
+    waist: input.waist ?? null,
+    hips: input.hips ?? null,
+    left_thigh: input.leftThigh ?? null,
+    right_thigh: input.rightThigh ?? null,
+    left_calf: input.leftCalf ?? null,
+    right_calf: input.rightCalf ?? null,
+  };
+}
+
+// Exported for the same dry-run-preview reason as the routine/workout/
+// exercise-template body builders above.
+export function toCreateBodyMeasurementBody(input: CreateBodyMeasurementInput) {
+  return { date: input.date, ...buildBodyMeasurementFields(input) };
+}
+
+export function toUpdateBodyMeasurementBody(input: UpdateBodyMeasurementInput) {
+  return buildBodyMeasurementFields(input);
+}
+
+// Unlike every other write endpoint in this API, Hevy's spec documents
+// POST/PUT .../body_measurements(/{date}) as returning a 200 with an empty
+// body — nothing to unwrap or trust as confirmation of what was actually
+// saved. Rather than echo back the input as if it were confirmed, both
+// functions below do a follow-up GET .../body_measurements/{date} and
+// return that instead, so the caller sees what Hevy actually persisted.
+// This matters more here than for most resources: PUT explicitly sets every
+// omitted field to null (see UpdateBodyMeasurementInput's comment above), so
+// a caller mistake would be silently destructive, and returning the real
+// stored state — not an assumed echo — surfaces that immediately instead of
+// only being discovered on the next unrelated read.
+//
+// POST also 409s if an entry for the date already exists (not specially
+// handled here — it surfaces as a normal thrown Hevy API error, same as any
+// other non-2xx response; see the tool description in
+// app/api/mcp/route.ts for what to do instead: update_body_measurement).
+export async function createBodyMeasurement(input: CreateBodyMeasurementInput) {
+  await hevyFetch<unknown>("/v1/body_measurements", {
+    method: "POST",
+    body: toCreateBodyMeasurementBody(input),
+  });
+  return getBodyMeasurementByDate(input.date);
+}
+
+export async function updateBodyMeasurement(
+  date: string,
+  input: UpdateBodyMeasurementInput
+) {
+  await hevyFetch<unknown>(`/v1/body_measurements/${encodeURIComponent(date)}`, {
+    method: "PUT",
+    body: toUpdateBodyMeasurementBody(input),
+  });
+  return getBodyMeasurementByDate(date);
 }
 
 // --- User info ------------------------------------------------------------

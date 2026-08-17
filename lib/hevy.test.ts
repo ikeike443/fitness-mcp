@@ -18,15 +18,25 @@ import {
   getUserInfo,
   getExerciseTemplateDetail,
   createCustomExerciseTemplate,
+  getBodyMeasurementByDate,
+  createBodyMeasurement,
+  updateBodyMeasurement,
 } from "./hevy";
 import type {
   CreateRoutineInput,
   CreateWorkoutInput,
   CreateCustomExerciseTemplateInput,
+  CreateBodyMeasurementInput,
 } from "./hevy";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
+}
+
+// Hevy's spec documents POST/PUT .../body_measurements(/{date}) as
+// returning a 200 with no response body at all — this simulates that.
+function emptyResponse(status = 200) {
+  return new Response("", { status });
 }
 
 const baseInput: CreateRoutineInput = {
@@ -1514,5 +1524,206 @@ describe("createCustomExerciseTemplate", () => {
     await expect(createCustomExerciseTemplate(baseCustomExerciseInput)).rejects.toThrow(
       /Unexpected Hevy custom exercise template response shape/
     );
+  });
+});
+
+const FULL_BODY_MEASUREMENT_API_RESPONSE = {
+  date: "2026-08-01",
+  weight_kg: 80.5,
+  lean_mass_kg: 65,
+  fat_percent: 18.5,
+  neck_cm: 38,
+  shoulder_cm: 115,
+  chest_cm: 95,
+  left_bicep_cm: 35,
+  right_bicep_cm: 35.5,
+  left_forearm_cm: 28,
+  right_forearm_cm: 28.5,
+  abdomen: 85,
+  waist: 80,
+  hips: 95,
+  left_thigh: 55,
+  right_thigh: 55.5,
+  left_calf: 37,
+  right_calf: 37.5,
+};
+
+const FULL_BODY_MEASUREMENT_OUTPUT = {
+  date: "2026-08-01",
+  weightKg: 80.5,
+  leanMassKg: 65,
+  fatPercent: 18.5,
+  neckCm: 38,
+  shoulderCm: 115,
+  chestCm: 95,
+  leftBicepCm: 35,
+  rightBicepCm: 35.5,
+  leftForearmCm: 28,
+  rightForearmCm: 28.5,
+  abdomen: 85,
+  waist: 80,
+  hips: 95,
+  leftThigh: 55,
+  rightThigh: 55.5,
+  leftCalf: 37,
+  rightCalf: 37.5,
+};
+
+describe("getBodyMeasurementByDate", () => {
+  it("GETs /v1/body_measurements/{date} and returns every field", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/body_measurements/2026-08-01");
+      return jsonResponse(FULL_BODY_MEASUREMENT_API_RESPONSE);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getBodyMeasurementByDate("2026-08-01");
+    expect(result).toEqual(FULL_BODY_MEASUREMENT_OUTPUT);
+  });
+
+  it("URL-encodes a date-like path segment containing special characters", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/body_measurements/2026%2F08%2F01");
+      return jsonResponse(FULL_BODY_MEASUREMENT_API_RESPONSE);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getBodyMeasurementByDate("2026/08/01");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createBodyMeasurement", () => {
+  const baseInput: CreateBodyMeasurementInput = {
+    date: "2026-08-01",
+    weightKg: 80.5,
+    fatPercent: 18.5,
+  };
+
+  it("POSTs the correctly shaped request body, tolerates Hevy's empty response body, and returns the read-back entry", async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      if (init.method === "POST") {
+        expect(url).toBe("https://api.hevyapp.com/v1/body_measurements");
+        expect(JSON.parse(init.body as string)).toEqual({
+          date: "2026-08-01",
+          weight_kg: 80.5,
+          lean_mass_kg: null,
+          fat_percent: 18.5,
+          neck_cm: null,
+          shoulder_cm: null,
+          chest_cm: null,
+          left_bicep_cm: null,
+          right_bicep_cm: null,
+          left_forearm_cm: null,
+          right_forearm_cm: null,
+          abdomen: null,
+          waist: null,
+          hips: null,
+          left_thigh: null,
+          right_thigh: null,
+          left_calf: null,
+          right_calf: null,
+        });
+        // Hevy's spec documents no response body on success — confirm this
+        // doesn't crash hevyFetch's res.json() call.
+        return emptyResponse(200);
+      }
+      // The follow-up read-back GET.
+      expect(url).toBe("https://api.hevyapp.com/v1/body_measurements/2026-08-01");
+      return jsonResponse({
+        ...FULL_BODY_MEASUREMENT_API_RESPONSE,
+        lean_mass_kg: null,
+        neck_cm: null,
+        shoulder_cm: null,
+        chest_cm: null,
+        left_bicep_cm: null,
+        right_bicep_cm: null,
+        left_forearm_cm: null,
+        right_forearm_cm: null,
+        abdomen: null,
+        waist: null,
+        hips: null,
+        left_thigh: null,
+        right_thigh: null,
+        left_calf: null,
+        right_calf: null,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createBodyMeasurement(baseInput);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({
+      ...FULL_BODY_MEASUREMENT_OUTPUT,
+      leanMassKg: null,
+      neckCm: null,
+      shoulderCm: null,
+      chestCm: null,
+      leftBicepCm: null,
+      rightBicepCm: null,
+      leftForearmCm: null,
+      rightForearmCm: null,
+      abdomen: null,
+      waist: null,
+      hips: null,
+      leftThigh: null,
+      rightThigh: null,
+      leftCalf: null,
+      rightCalf: null,
+    });
+  });
+
+  it("propagates the raw Hevy error body on a non-2xx response (e.g. 409 duplicate date) without a follow-up read", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({ error: "A measurement for this date already exists" }, 409)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createBodyMeasurement(baseInput)).rejects.toThrow(/already exists/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("updateBodyMeasurement", () => {
+  it("PUTs to /v1/body_measurements/{date} with no date field in the body, tolerates the empty response, and returns the read-back entry", async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      if (init.method === "PUT") {
+        expect(url).toBe("https://api.hevyapp.com/v1/body_measurements/2026-08-01");
+        const body = JSON.parse(init.body as string);
+        expect(body).not.toHaveProperty("date");
+        expect(body.weight_kg).toBe(81);
+        return emptyResponse(200);
+      }
+      expect(url).toBe("https://api.hevyapp.com/v1/body_measurements/2026-08-01");
+      return jsonResponse({ ...FULL_BODY_MEASUREMENT_API_RESPONSE, weight_kg: 81 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await updateBodyMeasurement("2026-08-01", { weightKg: 81 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.weightKg).toBe(81);
+  });
+
+  it("URL-encodes a date-like path segment containing special characters", async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/body_measurements/2026%2F08%2F01");
+      return init.method === "PUT" ? emptyResponse(200) : jsonResponse(FULL_BODY_MEASUREMENT_API_RESPONSE);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateBodyMeasurement("2026/08/01", { weightKg: 81 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("propagates the raw Hevy error body on a non-2xx response (e.g. 404 no entry for that date) without a follow-up read", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({ error: "No measurement found for the given date" }, 404)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateBodyMeasurement("2026-08-01", { weightKg: 81 })).rejects.toThrow(
+      /No measurement found/
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
