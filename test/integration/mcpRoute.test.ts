@@ -58,14 +58,16 @@ describe("POST /api/mcp auth", () => {
 });
 
 describe("POST /api/mcp tools/list", () => {
-  it("lists all 15 tools", async () => {
+  it("lists all 17 tools", async () => {
     const { json } = await callMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, AUTH_HEADER);
     const names = json.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual([
+      "create_custom_exercise_template",
       "create_routine",
       "create_routine_folder",
       "create_workout",
       "get_body_measurements",
+      "get_exercise_template_detail",
       "get_routine_detail",
       "get_user_info",
       "get_workout_count",
@@ -617,6 +619,143 @@ describe("POST /api/mcp tools/call — Hevy routines (real lib/hevy.ts, fetch mo
     expect(results).toEqual([
       { id: "tmpl-bench", title: "Bench Press (Barbell)", muscleGroup: "chest" },
     ]);
+  });
+
+  it("get_exercise_template_detail GETs /v1/exercise_templates/{id} and returns full detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/exercise_templates/tmpl-bench");
+        return new Response(
+          JSON.stringify({
+            id: "tmpl-bench",
+            title: "Bench Press (Barbell)",
+            type: "weight_reps",
+            primary_muscle_group: "chest",
+            secondary_muscle_groups: ["triceps"],
+            is_custom: false,
+          }),
+          { status: 200 }
+        );
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 30,
+        method: "tools/call",
+        params: { name: "get_exercise_template_detail", arguments: { exerciseTemplateId: "tmpl-bench" } },
+      },
+      AUTH_HEADER
+    );
+
+    expect(JSON.parse(json.result.content[0].text)).toEqual({
+      id: "tmpl-bench",
+      title: "Bench Press (Barbell)",
+      type: "weight_reps",
+      muscleGroup: "chest",
+      secondaryMuscleGroups: ["triceps"],
+      isCustom: false,
+    });
+  });
+
+  it("create_custom_exercise_template returns a dry-run payload preview without touching the Hevy API when confirm is not true", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { status, json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 31,
+        method: "tools/call",
+        params: {
+          name: "create_custom_exercise_template",
+          arguments: {
+            title: "Sled Push",
+            exerciseType: "weight_reps",
+            equipmentCategory: "other",
+            muscleGroup: "quadriceps",
+          },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    expect(status).toBe(200);
+    expect(json.result.isError).toBeUndefined();
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(preview.payload).toEqual({
+      exercise: {
+        title: "Sled Push",
+        exercise_type: "weight_reps",
+        equipment_category: "other",
+        muscle_group: "quadriceps",
+        other_muscles: [],
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("create_custom_exercise_template returns a dry-run preview when confirm is explicitly false", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 32,
+        method: "tools/call",
+        params: {
+          name: "create_custom_exercise_template",
+          arguments: {
+            title: "Sled Push",
+            exerciseType: "weight_reps",
+            equipmentCategory: "other",
+            muscleGroup: "quadriceps",
+            confirm: false,
+          },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("create_custom_exercise_template POSTs to Hevy and returns its id when confirmed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        expect(url).toBe("https://api.hevyapp.com/v1/exercise_templates");
+        expect(init.method).toBe("POST");
+        return new Response(JSON.stringify({ id: 123 }), { status: 200 });
+      })
+    );
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 33,
+        method: "tools/call",
+        params: {
+          name: "create_custom_exercise_template",
+          arguments: {
+            title: "Sled Push",
+            exerciseType: "weight_reps",
+            equipmentCategory: "other",
+            muscleGroup: "quadriceps",
+            confirm: true,
+          },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    expect(JSON.parse(json.result.content[0].text)).toEqual({ id: "123", title: "Sled Push" });
   });
 
   it("create_routine returns a dry-run payload preview without touching the Hevy API when confirm is not true", async () => {

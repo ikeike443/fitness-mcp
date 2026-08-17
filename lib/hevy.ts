@@ -852,3 +852,116 @@ export async function searchExerciseTemplates(query: string, limit = 10) {
       muscleGroup: t.primary_muscle_group,
     }));
 }
+
+export async function getExerciseTemplateDetail(exerciseTemplateId: string) {
+  const t = await hevyFetch<HevyExerciseTemplate>(
+    `/v1/exercise_templates/${encodeURIComponent(exerciseTemplateId)}`
+  );
+  return {
+    id: t.id,
+    title: t.title,
+    type: t.type,
+    muscleGroup: t.primary_muscle_group,
+    secondaryMuscleGroups: t.secondary_muscle_groups,
+    isCustom: t.is_custom,
+  };
+}
+
+// --- Custom exercise template creation ------------------------------------
+
+export type CustomExerciseType =
+  | "weight_reps"
+  | "reps_only"
+  | "bodyweight_reps"
+  | "bodyweight_assisted_reps"
+  | "duration"
+  | "weight_duration"
+  | "distance_duration"
+  | "short_distance_weight";
+
+export type EquipmentCategory =
+  | "none"
+  | "barbell"
+  | "dumbbell"
+  | "kettlebell"
+  | "machine"
+  | "plate"
+  | "resistance_band"
+  | "suspension"
+  | "other";
+
+export type MuscleGroup =
+  | "abdominals"
+  | "shoulders"
+  | "biceps"
+  | "triceps"
+  | "forearms"
+  | "quadriceps"
+  | "hamstrings"
+  | "calves"
+  | "glutes"
+  | "abductors"
+  | "adductors"
+  | "lats"
+  | "upper_back"
+  | "traps"
+  | "lower_back"
+  | "chest"
+  | "cardio"
+  | "neck"
+  | "full_body"
+  | "other";
+
+export interface CreateCustomExerciseTemplateInput {
+  title: string;
+  exerciseType: CustomExerciseType;
+  equipmentCategory: EquipmentCategory;
+  muscleGroup: MuscleGroup;
+  otherMuscles?: MuscleGroup[] | null;
+}
+
+// Exported for the same dry-run-preview reason as the routine/workout body
+// builders above.
+export function toCreateCustomExerciseTemplateBody(input: CreateCustomExerciseTemplateInput) {
+  return {
+    exercise: {
+      title: input.title,
+      exercise_type: input.exerciseType,
+      equipment_category: input.equipmentCategory,
+      muscle_group: input.muscleGroup,
+      other_muscles: input.otherMuscles ?? [],
+    },
+  };
+}
+
+// Hevy's OpenAPI spec documents POST /v1/exercise_templates's 200 response as
+// { id: integer } — unlike every other exercise_template_id in this API
+// (and everywhere else in this codebase), which is a UUID-like string, e.g.
+// "b459cba5-cd6d-463c-abd6-54f8eafcadcb" (see ExerciseTemplate.id in the
+// spec, and every exerciseTemplateId field elsewhere in lib/hevy.ts). This
+// is almost certainly a spec-documentation inconsistency, not an
+// intentional format difference, but it's unverified against a real
+// account — accepting either a string or a number here and coercing to a
+// string is cheap insurance either way, so the returned id is always usable
+// directly as exerciseTemplateId in create_routine/create_workout without
+// the caller needing to know which shape Hevy actually returned.
+function assertCustomExerciseTemplateResponseShape(data: unknown): { id: string } {
+  const d = data as { id?: unknown } | null;
+  if (!d || typeof d !== "object" || (typeof d.id !== "string" && typeof d.id !== "number")) {
+    throw new Error(
+      `Unexpected Hevy custom exercise template response shape (expected { id: string | number }): ${JSON.stringify(
+        data
+      )}`
+    );
+  }
+  return { id: String(d.id) };
+}
+
+export async function createCustomExerciseTemplate(input: CreateCustomExerciseTemplateInput) {
+  const data = await hevyFetch<unknown>("/v1/exercise_templates", {
+    method: "POST",
+    body: toCreateCustomExerciseTemplateBody(input),
+  });
+  const { id } = assertCustomExerciseTemplateResponseShape(data);
+  return { id, title: input.title };
+}
