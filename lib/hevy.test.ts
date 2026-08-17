@@ -16,8 +16,14 @@ import {
   createWorkout,
   updateWorkout,
   getUserInfo,
+  getExerciseTemplateDetail,
+  createCustomExerciseTemplate,
 } from "./hevy";
-import type { CreateRoutineInput, CreateWorkoutInput } from "./hevy";
+import type {
+  CreateRoutineInput,
+  CreateWorkoutInput,
+  CreateCustomExerciseTemplateInput,
+} from "./hevy";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
@@ -1383,5 +1389,130 @@ describe("getUserInfo", () => {
       name: "Jane Doe",
       profileUrl: "https://hevy.com/user/jane",
     });
+  });
+});
+
+describe("getExerciseTemplateDetail", () => {
+  it("GETs /v1/exercise_templates/{id} and returns full detail", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/exercise_templates/tmpl-bench");
+      return jsonResponse({
+        id: "tmpl-bench",
+        title: "Bench Press (Barbell)",
+        type: "weight_reps",
+        primary_muscle_group: "chest",
+        secondary_muscle_groups: ["triceps", "shoulders"],
+        is_custom: false,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getExerciseTemplateDetail("tmpl-bench");
+    expect(result).toEqual({
+      id: "tmpl-bench",
+      title: "Bench Press (Barbell)",
+      type: "weight_reps",
+      muscleGroup: "chest",
+      secondaryMuscleGroups: ["triceps", "shoulders"],
+      isCustom: false,
+    });
+  });
+
+  it("URL-encodes an exerciseTemplateId containing special characters", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/exercise_templates/foo%2Fbar..");
+      return jsonResponse({
+        id: "foo/bar..",
+        title: "x",
+        type: "weight_reps",
+        primary_muscle_group: "chest",
+        secondary_muscle_groups: [],
+        is_custom: false,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getExerciseTemplateDetail("foo/bar..");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createCustomExerciseTemplate", () => {
+  const baseCustomExerciseInput: CreateCustomExerciseTemplateInput = {
+    title: "Sled Push",
+    exerciseType: "weight_reps",
+    equipmentCategory: "other",
+    muscleGroup: "quadriceps",
+    otherMuscles: ["glutes", "hamstrings"],
+  };
+
+  it("POSTs the correctly shaped request body", async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/exercise_templates");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body as string)).toEqual({
+        exercise: {
+          title: "Sled Push",
+          exercise_type: "weight_reps",
+          equipment_category: "other",
+          muscle_group: "quadriceps",
+          other_muscles: ["glutes", "hamstrings"],
+        },
+      });
+      return jsonResponse({ id: 123 }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createCustomExerciseTemplate(baseCustomExerciseInput);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Hevy's spec documents this response as { id: integer }, unlike every
+    // other exercise_template_id in the API (a UUID-like string) — see the
+    // comment above assertCustomExerciseTemplateResponseShape in
+    // lib/hevy.ts. Confirms the id is coerced to a string either way.
+    expect(result).toEqual({ id: "123", title: "Sled Push" });
+  });
+
+  it("defaults otherMuscles to an empty array when omitted", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      expect(body.exercise.other_muscles).toEqual([]);
+      return jsonResponse({ id: 123 }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const withoutOtherMuscles: CreateCustomExerciseTemplateInput = {
+      title: baseCustomExerciseInput.title,
+      exerciseType: baseCustomExerciseInput.exerciseType,
+      equipmentCategory: baseCustomExerciseInput.equipmentCategory,
+      muscleGroup: baseCustomExerciseInput.muscleGroup,
+    };
+    await createCustomExerciseTemplate(withoutOtherMuscles);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts a string id in the response as well as a number", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ id: "b459cba5-cd6d" }, 200)));
+
+    const result = await createCustomExerciseTemplate(baseCustomExerciseInput);
+    expect(result).toEqual({ id: "b459cba5-cd6d", title: "Sled Push" });
+  });
+
+  it("propagates the raw Hevy error body on a non-2xx response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: "exceeds-custom-exercise-limit" }, 403))
+    );
+
+    await expect(createCustomExerciseTemplate(baseCustomExerciseInput)).rejects.toThrow(
+      /exceeds-custom-exercise-limit/
+    );
+  });
+
+  it("throws a clear diagnostic (not a TypeError) if Hevy returns an unexpected shape", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ not: "an id" }, 200)));
+
+    await expect(createCustomExerciseTemplate(baseCustomExerciseInput)).rejects.toThrow(
+      /Unexpected Hevy custom exercise template response shape/
+    );
   });
 });

@@ -10,7 +10,7 @@ A personal remote MCP (Model Context Protocol) server that lets Claude read and 
 
 ## Status
 
-- **Hevy**: implemented — read: workouts (paginated list, count, change events, detail), body measurements, exercise template search, routine folder listing, routine listing, routine detail, and basic account info. Write: create/update workouts (real logged training sessions) and routines (reusable workout plan templates), plus routine folders, so both a training menu and an actual session can be pushed directly into the Hevy app from conversation. Uses the official Hevy REST API directly. `lib/hevy/openapi-snapshot.json` is a checked-in copy of Hevy's public OpenAPI spec, kept as the source of truth for planning full API coverage — not all of it is implemented as MCP tools yet (notably: exercise template detail/creation, and body-measurement writes).
+- **Hevy**: implemented — read: workouts (paginated list, count, change events, detail), body measurements, exercise template search and detail, routine folder listing, routine listing, routine detail, and basic account info. Write: create/update workouts (real logged training sessions), create/update routines (reusable workout plan templates), routine folders, and custom exercise templates — so a training menu, an actual session, or a brand-new exercise can all be pushed directly into the Hevy app from conversation. Uses the official Hevy REST API directly. `lib/hevy/openapi-snapshot.json` is a checked-in copy of Hevy's public OpenAPI spec, kept as the source of truth for planning full API coverage — not all of it is implemented as MCP tools yet (notably: body-measurement writes).
 
 ## Tools exposed
 
@@ -24,6 +24,8 @@ A personal remote MCP (Model Context Protocol) server that lets Claude read and 
 | `update_workout` | write | Replace an existing logged workout's title/description/times/exercises entirely |
 | `get_body_measurements` | read | Recent Hevy body measurement entries (weight, body fat %) |
 | `search_exercise_templates` | read | Search Hevy's exercise library by name to resolve the `exercise_template_id` needed by the create/update tools |
+| `get_exercise_template_detail` | read | Full detail (type, primary/secondary muscle groups, custom or not) for one exercise template |
+| `create_custom_exercise_template` | write | Create a new custom exercise template for something not already in Hevy's library |
 | `list_routines` | read | List existing Hevy routines (id, title, folder, exercise count, updated time), optionally filtered by folder, to find a `routineId` |
 | `get_routine_detail` | read | Full exercise/set/rep(-range)/weight/rest-time detail for one routine (template) — read the current contents before `update_routine` overwrites them |
 | `create_routine` | write | Create a new Hevy routine (workout plan template) |
@@ -34,7 +36,7 @@ A personal remote MCP (Model Context Protocol) server that lets Claude read and 
 
 `create_workout`/`update_workout` log or replace a real training session (what was actually done, with real start/end times and performed sets); `create_routine`/`update_routine` create or replace a reusable plan/template. Use the workout tools for "log what I just did" and the routine tools for "design a plan I can follow later."
 
-The `write` tools make real changes to the user's Hevy account (creating/replacing workouts, routines, and folders). Every write tool takes a `confirm` argument that defaults to `false`: with `confirm` false or omitted, the tool is a no-op dry run — it never calls the Hevy API, and instead returns the exact payload it would have sent, wrapped as `{ dryRun: true, payload: {...} }`. Only `confirm: true` performs the real write. Tool descriptions also instruct the calling LLM to show the user the full planned content and get explicit confirmation before setting `confirm: true` — but since that argument is set by the same LLM deciding whether to call the tool at all, this instruction is not a guarantee of human confirmation on its own; the dry-run default is what actually prevents an accidental real write regardless of what the LLM does. There is no scope separation between read and write tools at the authentication layer (see Authentication below) — any authenticated caller can invoke any tool.
+The `write` tools make real changes to the user's Hevy account (creating/replacing workouts, routines, folders, and exercise templates). Every write tool takes a `confirm` argument that defaults to `false`: with `confirm` false or omitted, the tool is a no-op dry run — it never calls the Hevy API, and instead returns the exact payload it would have sent, wrapped as `{ dryRun: true, payload: {...} }`. Only `confirm: true` performs the real write. Tool descriptions also instruct the calling LLM to show the user the full planned content and get explicit confirmation before setting `confirm: true` — but since that argument is set by the same LLM deciding whether to call the tool at all, this instruction is not a guarantee of human confirmation on its own; the dry-run default is what actually prevents an accidental real write regardless of what the LLM does. There is no scope separation between read and write tools at the authentication layer (see Authentication below) — any authenticated caller can invoke any tool.
 
 ## Authentication
 
@@ -83,7 +85,7 @@ curl -X POST http://localhost:3000/api/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Should return the 15 tools above. A request with a missing/wrong token should get `401`.
+Should return the 17 tools above. A request with a missing/wrong token should get `401`.
 
 ## Testing
 
@@ -97,13 +99,13 @@ npm run test:e2e     # starts a real `next start` server and hits it over real H
                       # (node's built-in test runner, no extra dependency)
 ```
 
-- **Unit** (`lib/*.test.ts`): bearer-token verification, OAuth code signing/PKCE/redirect-URI allowlisting (including the RFC 7636 PKCE test vector), Hevy routine and workout request-body construction and validation (`@` rejection in notes, set-type enum, rpe enum, read-only field stripping, exercise-template search caching/pagination, routine-folder listing/pagination-walk, routine listing/folder-filtering/pagination-walk, routine/workout detail read-shape unwrapping, workout list/count/events pagination and response-shape assertions).
+- **Unit** (`lib/*.test.ts`): bearer-token verification, OAuth code signing/PKCE/redirect-URI allowlisting (including the RFC 7636 PKCE test vector), Hevy routine/workout/exercise-template request-body construction and validation (`@` rejection in notes, set-type enum, rpe enum, read-only field stripping, exercise-template search caching/pagination, routine-folder listing/pagination-walk, routine listing/folder-filtering/pagination-walk, routine/workout detail read-shape unwrapping, workout list/count/events pagination and response-shape assertions, custom exercise template creation response-shape coercion).
 - **Integration** (`test/integration/*.test.ts`): the real `app/api/mcp/route.ts` handler wired to real `lib/auth.ts`/`lib/hevy.ts` with only `fetch` mocked, including a full `search_exercise_templates` → `create_routine_folder` → `create_routine` × 3 walkthrough of a real 3-day/week training program, and that every write tool's `confirm: false`/omitted dry-run path returns the exact would-be payload without ever calling `fetch`; the real `/api/oauth/authorize` and `/api/oauth/token` route handlers; and the `.well-known` OAuth metadata routes.
-- **E2E** (`test/e2e/*.e2e.test.mjs`): boots the production build and asserts over real HTTP — health check, 401 on bad/missing auth, `tools/list` returns all 15 tools, OAuth discovery metadata, and a full authorization-code + PKCE round trip that ends with a working access token against `/api/mcp`. Doesn't exercise real Hevy data (CI has no real credentials by design).
+- **E2E** (`test/e2e/*.e2e.test.mjs`): boots the production build and asserts over real HTTP — health check, 401 on bad/missing auth, `tools/list` returns all 17 tools, OAuth discovery metadata, and a full authorization-code + PKCE round trip that ends with a working access token against `/api/mcp`. Doesn't exercise real Hevy data (CI has no real credentials by design).
 
 ### Manually verifying Hevy write operations
 
-CI never touches real Hevy data, so the write tools (`create_routine`, `update_routine`, `create_routine_folder`, `create_workout`, `update_workout`) — and the read tools over the same resources — need a one-off manual check against a real Hevy Pro account after any change to them:
+CI never touches real Hevy data, so the write tools (`create_routine`, `update_routine`, `create_routine_folder`, `create_workout`, `update_workout`, `create_custom_exercise_template`) — and the read tools over the same resources — need a one-off manual check against a real Hevy Pro account after any change to them:
 
 1. Set a real `HEVY_API_KEY` in `.env.local`, then run `vercel dev`.
 2. Call `search_exercise_templates` with a real query (e.g. via the smoke-test `curl` pattern above, using `tools/call` instead of `tools/list`) and confirm real candidates come back.
@@ -116,8 +118,11 @@ CI never touches real Hevy data, so the write tools (`create_routine`, `update_r
 9. Call `create_workout` the same way — dry run first, then `confirm: true` with an obviously-throwaway title, real `start_time`/`end_time`, and a real `exercise_template_id`. **This is the one to watch most closely**: unlike routines, `create_workout`/`update_workout` assume Hevy's OpenAPI spec is accurate about the response being a bare `Workout` object rather than wrapped like routines are (see the comment above `assertWorkoutShape` in `lib/hevy.ts`) — this has not been confirmed against a real account. If the call throws `Unexpected Hevy workout response shape`, that confirms Hevy wraps it after all and `lib/hevy.ts` needs the same kind of unwrapping `unwrapRoutineResponse` does for routines.
 10. Call `get_workout_detail` with the returned `id` and confirm exercises/sets/reps/weights/RPE match, then `list_workouts` and `list_workout_events` (with a `since` before the workout's creation) and confirm it shows up in both. Optionally call `update_workout` against the same `id` to verify the overwrite path, and `get_workout_count` to sanity-check the total went up by one.
 11. **Delete the test workout manually in the Hevy app** (same reasoning as step 8 — no documented delete endpoint).
-12. Call `get_user_info` and confirm the returned id/name/profile URL match your account.
-13. Never commit a real `HEVY_API_KEY`, and never run this check in CI.
+12. Call `get_exercise_template_detail` with a real `exercise_template_id` (from step 2) and confirm the returned type/muscle groups match what's shown in the Hevy app.
+13. Call `create_custom_exercise_template` — dry run first, then `confirm: true` with an obviously-throwaway title. **Also worth watching closely**: Hevy's spec documents the creation response as `{ id: integer }`, unlike every other `exercise_template_id` in the API (a UUID-like string) — `createCustomExerciseTemplate` in `lib/hevy.ts` coerces whatever comes back to a string, but this hasn't been confirmed against a real account. Call `get_exercise_template_detail` with the returned id and confirm it resolves and the fields match what you sent.
+14. **Delete the test custom exercise manually in the Hevy app** (same reasoning as step 8 — no documented delete endpoint for exercise templates either).
+15. Call `get_user_info` and confirm the returned id/name/profile URL match your account.
+16. Never commit a real `HEVY_API_KEY`, and never run this check in CI.
 
 ## Environment variables
 
@@ -145,6 +150,6 @@ Custom connectors can only be **added** from claude.ai (web) or the desktop app 
 2. Name: `Fitness Data`. URL: `https://fitness-mcp-eight.vercel.app/api/mcp`.
 3. If your account has the "Request headers" beta: add `Authorization: Bearer <MCP_BEARER_TOKEN>` there and skip to step 5.
 4. Otherwise, open Advanced settings and fill in **OAuth Client ID** / **OAuth Client Secret** with the `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` values set in Vercel. Claude will discover the `/authorize` and `/token` endpoints automatically via this server's `.well-known` metadata.
-5. Save. Claude should list the 15 tools above.
+5. Save. Claude should list the 17 tools above.
 
 Try asking: "直近のワークアウトを教えて" (tell me about my recent workouts), or "3日/週の筋トレメニューを考えてHevyに登録して" (design a 3-day/week training menu and register it in Hevy).

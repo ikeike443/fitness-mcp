@@ -11,6 +11,8 @@ import {
   getUserInfo,
   getBodyMeasurements,
   searchExerciseTemplates,
+  getExerciseTemplateDetail,
+  createCustomExerciseTemplate,
   createRoutine,
   updateRoutine,
   createRoutineFolder,
@@ -22,6 +24,7 @@ import {
   toCreateRoutineFolderBody,
   toCreateWorkoutBody,
   toUpdateWorkoutBody,
+  toCreateCustomExerciseTemplateBody,
 } from "@/lib/hevy";
 
 export const maxDuration = 30;
@@ -184,6 +187,61 @@ const workoutBodySchema = {
     .min(1)
     .describe("Ordered list of exercises actually performed in this workout, in order"),
 };
+
+// Shared schema fragments for create_custom_exercise_template below.
+const exerciseTypeSchema = z
+  .enum([
+    "weight_reps",
+    "reps_only",
+    "bodyweight_reps",
+    "bodyweight_assisted_reps",
+    "duration",
+    "weight_duration",
+    "distance_duration",
+    "short_distance_weight",
+  ])
+  .describe(
+    "How this exercise is tracked/scored — must be exactly one of: weight_reps, reps_only, bodyweight_reps, bodyweight_assisted_reps, duration, weight_duration, distance_duration, short_distance_weight"
+  );
+
+const equipmentCategorySchema = z
+  .enum([
+    "none",
+    "barbell",
+    "dumbbell",
+    "kettlebell",
+    "machine",
+    "plate",
+    "resistance_band",
+    "suspension",
+    "other",
+  ])
+  .describe(
+    "Equipment used — must be exactly one of: none, barbell, dumbbell, kettlebell, machine, plate, resistance_band, suspension, other"
+  );
+
+const muscleGroupSchema = z.enum([
+  "abdominals",
+  "shoulders",
+  "biceps",
+  "triceps",
+  "forearms",
+  "quadriceps",
+  "hamstrings",
+  "calves",
+  "glutes",
+  "abductors",
+  "adductors",
+  "lats",
+  "upper_back",
+  "traps",
+  "lower_back",
+  "chest",
+  "cardio",
+  "neck",
+  "full_body",
+  "other",
+]);
 
 // Every write tool takes this same confirm flag, defaulting to false/dry-run
 // so the tool is safe to call speculatively while drafting content with the
@@ -441,6 +499,58 @@ const handler = createMcpHandler(
         const results = await searchExerciseTemplates(query, limit ?? 10);
         return {
           content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "get_exercise_template_detail",
+      {
+        title: "Get Hevy exercise template detail",
+        description:
+          "Get full detail (title, exercise type, primary muscle group, secondary muscle groups, whether it's a custom exercise) for a single Hevy exercise template by its exercise_template_id (obtain the ID from search_exercise_templates).",
+        inputSchema: z.object({
+          exerciseTemplateId: z.string().min(1).describe("The Hevy exercise_template_id"),
+        }),
+      },
+      async ({ exerciseTemplateId }) => {
+        const template = await getExerciseTemplateDetail(exerciseTemplateId);
+        return {
+          content: [{ type: "text", text: JSON.stringify(template, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "create_custom_exercise_template",
+      {
+        title: "Create a custom Hevy exercise template",
+        description:
+          "Create a new custom exercise template in the user's Hevy account, for an exercise not already in Hevy's library. Always call search_exercise_templates first to confirm a matching exercise doesn't already exist — Hevy enforces a limit on the number of custom exercises per account and rejects creation once that limit is reached. Without confirm: true this is a no-op dry run that only returns the payload that would be sent — with confirm: true IT IS A REAL WRITE. Show the user the full planned exercise (title, exercise type, equipment, muscle groups) and get explicit confirmation before setting confirm: true. Returns only the new template's id and title — call get_exercise_template_detail with the id afterward if you need the full detail back.",
+        inputSchema: z.object({
+          title: z.string().min(1).describe("Exercise title as it will appear in Hevy"),
+          exerciseType: exerciseTypeSchema,
+          equipmentCategory: equipmentCategorySchema,
+          muscleGroup: muscleGroupSchema.describe(
+            "Primary muscle group — must be exactly one of: abdominals, shoulders, biceps, triceps, forearms, quadriceps, hamstrings, calves, glutes, abductors, adductors, lats, upper_back, traps, lower_back, chest, cardio, neck, full_body, other"
+          ),
+          otherMuscles: z
+            .array(muscleGroupSchema)
+            .optional()
+            .describe(
+              "Secondary muscle groups also worked, or omit for none — same enum as muscleGroup"
+            ),
+          confirm: confirmSchema,
+        }),
+      },
+      async ({ title, exerciseType, equipmentCategory, muscleGroup, otherMuscles, confirm }) => {
+        const input = { title, exerciseType, equipmentCategory, muscleGroup, otherMuscles };
+        if (!confirm) {
+          return dryRunPreview(toCreateCustomExerciseTemplateBody(input));
+        }
+        const template = await createCustomExerciseTemplate(input);
+        return {
+          content: [{ type: "text", text: JSON.stringify(template, null, 2) }],
         };
       }
     );
