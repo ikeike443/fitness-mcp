@@ -432,6 +432,25 @@ describe("POST /api/mcp tools/call — Hevy workouts write (real lib/hevy.ts, fe
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("create_workout returns a dry-run preview when confirm is explicitly false", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 30,
+        method: "tools/call",
+        params: { name: "create_workout", arguments: { ...WORKOUT_INPUT, confirm: false } },
+      },
+      AUTH_HEADER
+    );
+
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("create_workout POSTs the workout to Hevy and returns its id when confirmed", async () => {
     vi.stubGlobal(
       "fetch",
@@ -474,6 +493,28 @@ describe("POST /api/mcp tools/call — Hevy workouts write (real lib/hevy.ts, fe
         params: {
           name: "update_workout",
           arguments: { workoutId: "workout-1", ...WORKOUT_INPUT },
+        },
+      },
+      AUTH_HEADER
+    );
+
+    const preview = JSON.parse(json.result.content[0].text);
+    expect(preview.dryRun).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("update_workout returns a dry-run preview when confirm is explicitly false", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callMcp(
+      {
+        jsonrpc: "2.0",
+        id: 31,
+        method: "tools/call",
+        params: {
+          name: "update_workout",
+          arguments: { workoutId: "workout-1", ...WORKOUT_INPUT, confirm: false },
         },
       },
       AUTH_HEADER

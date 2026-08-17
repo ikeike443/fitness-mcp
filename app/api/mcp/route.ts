@@ -167,11 +167,7 @@ const workoutExerciseSchema = z.object({
 
 const workoutBodySchema = {
   title: z.string().min(1).describe("Workout title as it will appear in Hevy"),
-  description: z
-    .string()
-    .nullable()
-    .optional()
-    .describe("Workout-level description/notes"),
+  description: notesSchema.describe('Workout-level description/notes. Must not contain "@".'),
   startTime: z
     .string()
     .min(1)

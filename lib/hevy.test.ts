@@ -902,6 +902,17 @@ describe("listWorkouts", () => {
     );
   });
 
+  it("clamps a page of 0 or negative up to 1", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ page: 1, page_count: 4, workouts: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listWorkouts({ page: -3 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.hevyapp.com/v1/workouts?page=1&pageSize=5",
+      expect.anything()
+    );
+  });
+
   it("surfaces routineId when a workout was logged from a routine", async () => {
     vi.stubGlobal(
       "fetch",
@@ -953,6 +964,17 @@ describe("listWorkoutEvents", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await listWorkoutEvents({ since: "2026-08-01T00:00:00Z" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("clamps a page of 0 or negative up to 1", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toContain("page=1&");
+      return jsonResponse({ page: 1, page_count: 1, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listWorkoutEvents({ page: 0 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -1127,6 +1149,16 @@ describe("createWorkout", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects a workout-level description containing "@" without calling fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createWorkout({ ...baseWorkoutInput, description: "ping me @coach" })
+    ).rejects.toThrow(/must not contain "@"/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid set type without calling fetch", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -1238,6 +1270,90 @@ describe("updateWorkout", () => {
       })
     ).rejects.toThrow(/must not contain "@"/);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a workout-level description containing "@" without calling fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateWorkout("workout-1", { ...baseWorkoutInput, description: "ping me @coach" })
+    ).rejects.toThrow(/must not contain "@"/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid set type without calling fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateWorkout("workout-1", {
+        ...baseWorkoutInput,
+        exercises: [
+          {
+            ...baseWorkoutInput.exercises[0],
+            sets: [{ type: "working" as CreateWorkoutInput["exercises"][number]["sets"][number]["type"], reps: 5 }],
+          },
+        ],
+      })
+    ).rejects.toThrow(/Invalid set type "working"/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid rpe value without calling fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateWorkout("workout-1", {
+        ...baseWorkoutInput,
+        exercises: [
+          {
+            ...baseWorkoutInput.exercises[0],
+            sets: [{ type: "normal", reps: 5, rpe: 8.25 }],
+          },
+        ],
+      })
+    ).rejects.toThrow(/Invalid rpe 8.25/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("never leaks read-only fields into the outgoing request body", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const raw = init.body as string;
+      expect(raw).not.toContain("created_at");
+      expect(raw).not.toContain("\"id\"");
+      return jsonResponse(workoutApiResponse, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pollutedInput = {
+      ...baseWorkoutInput,
+      id: "should-not-be-sent",
+      created_at: "should-not-be-sent",
+    } as unknown as CreateWorkoutInput;
+
+    await updateWorkout("workout-1", pollutedInput);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates the raw Hevy error body on a non-2xx response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: "validation_error" }, 422))
+    );
+
+    await expect(updateWorkout("workout-1", baseWorkoutInput)).rejects.toThrow(
+      /validation_error/
+    );
+  });
+
+  it("throws a clear diagnostic (not a TypeError) if Hevy returns an unexpected shape", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ not: "a workout" }, 200)));
+
+    await expect(updateWorkout("workout-1", baseWorkoutInput)).rejects.toThrow(
+      /Unexpected Hevy workout response shape/
+    );
   });
 
   it("URL-encodes a workoutId containing special characters", async () => {

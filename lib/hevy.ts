@@ -301,6 +301,7 @@ export interface CreateWorkoutInput {
 export type UpdateWorkoutInput = CreateWorkoutInput;
 
 function buildWorkoutFields(input: CreateWorkoutInput) {
+  assertValidNotes(input.description ?? null);
   return {
     title: input.title,
     description: input.description ?? null,
@@ -356,7 +357,7 @@ function assertWorkoutShape(data: unknown): HevyWorkout {
   const w = data as Partial<HevyWorkout> | null;
   if (!w || typeof w !== "object" || typeof w.id !== "string" || !Array.isArray(w.exercises)) {
     throw new Error(
-      `Unexpected Hevy workout response shape (expected a bare Workout object per the OpenAPI spec — see toWorkoutOutput's comment above if Hevy actually wraps this the way it wraps routines): ${JSON.stringify(
+      `Unexpected Hevy workout response shape (expected a bare Workout object per the OpenAPI spec — see the comment at the top of this Workout write support section if Hevy actually wraps this the way it wraps routines): ${JSON.stringify(
         data
       )}`
     );
