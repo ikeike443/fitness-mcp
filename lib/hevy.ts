@@ -30,6 +30,48 @@ async function hevyFetch<T>(
   return res.json() as Promise<T>;
 }
 
+// --- Shared write-validation helpers -------------------------------------
+//
+// Both the workout and routine write endpoints below are real write
+// operations with side effects in the user's account, and Hevy's API is
+// reportedly strict about malformed fields. Validation here is
+// intentionally defense-in-depth on top of the zod schemas in
+// app/api/mcp/route.ts: it protects any direct caller of this module
+// (including tests) even if the MCP-layer schema is bypassed.
+
+const VALID_SET_TYPES = new Set(["warmup", "normal", "failure", "dropset"]);
+const VALID_RPE_VALUES = new Set([6, 7, 7.5, 8, 8.5, 9, 9.5, 10]);
+
+function assertValidNotes(notes: string | null | undefined): void {
+  if (typeof notes === "string" && notes.includes("@")) {
+    throw new Error(
+      `Invalid notes: must not contain "@" (Hevy rejects this) — got: ${JSON.stringify(
+        notes
+      )}`
+    );
+  }
+}
+
+function assertValidSetType(type: string): void {
+  if (!VALID_SET_TYPES.has(type)) {
+    throw new Error(
+      `Invalid set type "${type}": must be one of ${[...VALID_SET_TYPES].join(", ")}`
+    );
+  }
+}
+
+// RPE is only meaningful on workout sets (Hevy's routine-write schema has no
+// rpe field at all — routines are templates with target reps/weight, not a
+// recorded exertion), so only toCreateWorkoutBody/toUpdateWorkoutBody call
+// this, unlike assertValidNotes/assertValidSetType above.
+function assertValidRpe(rpe: number | null | undefined): void {
+  if (rpe != null && !VALID_RPE_VALUES.has(rpe)) {
+    throw new Error(
+      `Invalid rpe ${rpe}: must be one of ${[...VALID_RPE_VALUES].join(", ")}, or null/omit`
+    );
+  }
+}
+
 interface HevySet {
   index: number;
   type: string;
@@ -38,6 +80,7 @@ interface HevySet {
   distance_meters: number | null;
   duration_seconds: number | null;
   rpe: number | null;
+  custom_metric: number | null;
 }
 
 interface HevyExercise {
@@ -45,12 +88,21 @@ interface HevyExercise {
   title: string;
   notes: string | null;
   exercise_template_id: string;
+  // Hevy's read schema for a workout's exercises spells this "supersets_id"
+  // (matching the routine read-side quirk documented on
+  // HevyRoutineExercise below) — unlike the write schema
+  // (PostWorkoutsRequestExercise), which uses "superset_id".
+  supersets_id: number | null;
   sets: HevySet[];
 }
 
 interface HevyWorkout {
   id: string;
   title: string;
+  // Present when this workout was logged from a routine; absent/undefined
+  // otherwise. Not nullable in the spec (no example of an explicit null),
+  // so this is typed as optional rather than `| null`.
+  routine_id?: string;
   description: string | null;
   start_time: string;
   end_time: string;
@@ -63,6 +115,32 @@ interface HevyWorkoutsResponse {
   page: number;
   page_count: number;
   workouts: HevyWorkout[];
+}
+
+interface HevyWorkoutCountResponse {
+  workout_count: number;
+}
+
+// GET /v1/workouts/events returns a stream of update/delete events so a
+// client can keep a local cache in sync without re-fetching every workout —
+// see listWorkoutEvents below.
+interface HevyUpdatedWorkoutEvent {
+  type: "updated";
+  workout: HevyWorkout;
+}
+
+interface HevyDeletedWorkoutEvent {
+  type: "deleted";
+  id: string;
+  deleted_at: string;
+}
+
+type HevyWorkoutEvent = HevyUpdatedWorkoutEvent | HevyDeletedWorkoutEvent;
+
+interface HevyWorkoutEventsResponse {
+  page: number;
+  page_count: number;
+  events: HevyWorkoutEvent[];
 }
 
 interface HevyBodyMeasurement {
@@ -82,6 +160,7 @@ function summarizeWorkout(w: HevyWorkout) {
   return {
     id: w.id,
     title: w.title,
+    routineId: w.routine_id ?? null,
     startTime: w.start_time,
     endTime: w.end_time,
     exerciseCount: w.exercises.length,
@@ -89,25 +168,68 @@ function summarizeWorkout(w: HevyWorkout) {
   };
 }
 
-export async function listRecentWorkouts(limit = 5) {
-  const pageSize = Math.min(Math.max(limit, 1), 10);
+const WORKOUT_PAGE_SIZE_MAX = 10;
+
+// Unlike listRoutines/listRoutineFolders/searchExerciseTemplates above (all
+// of which walk every page internally, since a caller needs the complete
+// set to filter/search across), workout history can be arbitrarily long, so
+// pagination is exposed to the caller directly instead of walked — the
+// point of list_workouts is browsing recent history a page at a time, not
+// materializing the whole account.
+export async function listWorkouts(opts: { page?: number; pageSize?: number } = {}) {
+  const page = Math.max(opts.page ?? 1, 1);
+  const pageSize = Math.min(Math.max(opts.pageSize ?? 5, 1), WORKOUT_PAGE_SIZE_MAX);
   const data = await hevyFetch<HevyWorkoutsResponse>(
-    `/v1/workouts?page=1&pageSize=${pageSize}`
+    `/v1/workouts?page=${page}&pageSize=${pageSize}`
   );
-  return data.workouts.map(summarizeWorkout);
+  return {
+    page: data.page,
+    pageCount: data.page_count,
+    workouts: data.workouts.map(summarizeWorkout),
+  };
 }
 
-export async function getWorkoutDetail(workoutId: string) {
-  const w = await hevyFetch<HevyWorkout>(`/v1/workouts/${workoutId}`);
+export async function getWorkoutCount() {
+  const data = await hevyFetch<HevyWorkoutCountResponse>("/v1/workouts/count");
+  return { count: data.workout_count };
+}
+
+function summarizeWorkoutEvent(e: HevyWorkoutEvent) {
+  if (e.type === "deleted") {
+    return { type: "deleted" as const, id: e.id, deletedAt: e.deleted_at };
+  }
+  return { type: "updated" as const, workout: summarizeWorkout(e.workout) };
+}
+
+export async function listWorkoutEvents(
+  opts: { since?: string; page?: number; pageSize?: number } = {}
+) {
+  const page = Math.max(opts.page ?? 1, 1);
+  const pageSize = Math.min(Math.max(opts.pageSize ?? 5, 1), WORKOUT_PAGE_SIZE_MAX);
+  const since = opts.since ?? "1970-01-01T00:00:00Z";
+  const data = await hevyFetch<HevyWorkoutEventsResponse>(
+    `/v1/workouts/events?page=${page}&pageSize=${pageSize}&since=${encodeURIComponent(since)}`
+  );
+  return {
+    page: data.page,
+    pageCount: data.page_count,
+    events: data.events.map(summarizeWorkoutEvent),
+  };
+}
+
+function toWorkoutDetailOutput(w: HevyWorkout) {
   return {
     id: w.id,
     title: w.title,
+    routineId: w.routine_id ?? null,
     description: w.description,
     startTime: w.start_time,
     endTime: w.end_time,
     exercises: w.exercises.map((e) => ({
+      exerciseTemplateId: e.exercise_template_id,
       title: e.title,
       notes: e.notes,
+      supersetId: e.supersets_id ?? null,
       sets: e.sets.map((s) => ({
         type: s.type,
         weightKg: s.weight_kg,
@@ -115,9 +237,151 @@ export async function getWorkoutDetail(workoutId: string) {
         distanceMeters: s.distance_meters,
         durationSeconds: s.duration_seconds,
         rpe: s.rpe,
+        customMetric: s.custom_metric,
       })),
     })),
   };
+}
+
+export async function getWorkoutDetail(workoutId: string) {
+  const w = await hevyFetch<HevyWorkout>(`/v1/workouts/${encodeURIComponent(workoutId)}`);
+  return toWorkoutDetailOutput(w);
+}
+
+// --- Workout write support ------------------------------------------------
+//
+// Unlike routines (see "Routine write support" below), Hevy's own OpenAPI
+// spec documents POST/PUT /v1/workouts as returning a bare Workout object,
+// not wrapped under a "workout" key or array like routines are (see
+// unwrapRoutineResponse's comment for the routine equivalent, discovered
+// only through real-account testing since the spec didn't document it
+// either). No such bug report exists yet for workouts, so this trusts the
+// spec — but that trust is unverified against a real account, and routines
+// are a concrete example of Hevy's spec not matching real behavior. If a
+// real create_workout/update_workout call ever throws the "unexpected
+// shape" error below, that's the first place to look.
+
+export interface WorkoutSetInput {
+  type: "warmup" | "normal" | "failure" | "dropset";
+  weightKg?: number | null;
+  reps?: number | null;
+  distanceMeters?: number | null;
+  durationSeconds?: number | null;
+  // Only meaningful for workouts (recorded sets), not routines (templates)
+  // — see assertValidRpe's comment.
+  rpe?: number | null;
+  customMetric?: number | null;
+}
+
+export interface WorkoutExerciseInput {
+  exerciseTemplateId: string;
+  supersetId?: number | null;
+  notes?: string | null;
+  sets: WorkoutSetInput[];
+}
+
+export interface CreateWorkoutInput {
+  title: string;
+  description?: string | null;
+  startTime: string;
+  endTime: string;
+  // Hevy's spec gives no documented default for is_private, so fitness-mcp
+  // picks one explicitly (false) rather than omitting the field and letting
+  // Hevy decide — see the isPrivate schema description in
+  // app/api/mcp/route.ts, which surfaces this as our own choice, not a
+  // documented Hevy default.
+  isPrivate?: boolean;
+  exercises: WorkoutExerciseInput[];
+}
+
+// PUT /v1/workouts/{id} accepts the exact same body shape as POST
+// /v1/workouts (both $ref the same PostWorkoutsRequestBody schema) — unlike
+// routines, where update has no folder_id field. So workouts have no
+// separate Update*Input type.
+export type UpdateWorkoutInput = CreateWorkoutInput;
+
+function buildWorkoutFields(input: CreateWorkoutInput) {
+  assertValidNotes(input.description ?? null);
+  return {
+    title: input.title,
+    description: input.description ?? null,
+    start_time: input.startTime,
+    end_time: input.endTime,
+    is_private: input.isPrivate ?? false,
+    exercises: input.exercises.map((e) => {
+      assertValidNotes(e.notes ?? null);
+      return {
+        exercise_template_id: e.exerciseTemplateId,
+        superset_id: e.supersetId ?? null,
+        notes: e.notes ?? null,
+        sets: e.sets.map((s) => {
+          assertValidSetType(s.type);
+          assertValidRpe(s.rpe ?? null);
+          return {
+            type: s.type,
+            weight_kg: s.weightKg ?? null,
+            reps: s.reps ?? null,
+            distance_meters: s.distanceMeters ?? null,
+            duration_seconds: s.durationSeconds ?? null,
+            rpe: s.rpe ?? null,
+            custom_metric: s.customMetric ?? null,
+          };
+        }),
+      };
+    }),
+  };
+}
+
+// Exported for the same dry-run-preview reason as toCreateRoutineBody /
+// toUpdateRoutineBody / toCreateRoutineFolderBody above.
+export function toCreateWorkoutBody(input: CreateWorkoutInput) {
+  return { workout: buildWorkoutFields(input) };
+}
+
+export function toUpdateWorkoutBody(input: UpdateWorkoutInput) {
+  return { workout: buildWorkoutFields(input) };
+}
+
+function toWorkoutOutput(w: HevyWorkout) {
+  return {
+    id: w.id,
+    title: w.title,
+    routineId: w.routine_id ?? null,
+    startTime: w.start_time,
+    endTime: w.end_time,
+    exerciseCount: w.exercises.length,
+  };
+}
+
+function assertWorkoutShape(data: unknown): HevyWorkout {
+  const w = data as Partial<HevyWorkout> | null;
+  if (!w || typeof w !== "object" || typeof w.id !== "string" || !Array.isArray(w.exercises)) {
+    throw new Error(
+      `Unexpected Hevy workout response shape (expected a bare Workout object per the OpenAPI spec — see the comment at the top of this Workout write support section if Hevy actually wraps this the way it wraps routines): ${JSON.stringify(
+        data
+      )}`
+    );
+  }
+  return w as HevyWorkout;
+}
+
+export async function createWorkout(input: CreateWorkoutInput) {
+  const data = await hevyFetch<unknown>("/v1/workouts", {
+    method: "POST",
+    body: toCreateWorkoutBody(input),
+  });
+  return toWorkoutOutput(assertWorkoutShape(data));
+}
+
+export async function updateWorkout(workoutId: string, input: UpdateWorkoutInput) {
+  const data = await hevyFetch<unknown>(
+    `/v1/workouts/${encodeURIComponent(workoutId)}`,
+    {
+      method: "PUT",
+      body: toUpdateWorkoutBody(input),
+    }
+  );
+  return toWorkoutOutput(assertWorkoutShape(data));
 }
 
 export async function getBodyMeasurements(limit = 10) {
@@ -132,33 +396,24 @@ export async function getBodyMeasurements(limit = 10) {
   }));
 }
 
+// --- User info ------------------------------------------------------------
+
+interface HevyUserInfo {
+  id: string;
+  name: string;
+  url: string;
+}
+
+interface HevyUserInfoResponse {
+  data: HevyUserInfo;
+}
+
+export async function getUserInfo() {
+  const data = await hevyFetch<HevyUserInfoResponse>("/v1/user/info");
+  return { id: data.data.id, name: data.data.name, profileUrl: data.data.url };
+}
+
 // --- Routine write support ---------------------------------------------
-//
-// Hevy's routine endpoints are write operations with real side effects in
-// the user's account, and Hevy's API is reportedly strict about malformed
-// fields. Validation here is intentionally defense-in-depth on top of the
-// zod schema in app/api/mcp/route.ts: it protects any direct caller of
-// this module (including tests) even if the MCP-layer schema is bypassed.
-
-const VALID_SET_TYPES = new Set(["warmup", "normal", "failure", "dropset"]);
-
-function assertValidNotes(notes: string | null | undefined): void {
-  if (typeof notes === "string" && notes.includes("@")) {
-    throw new Error(
-      `Invalid notes: must not contain "@" (Hevy rejects this) — got: ${JSON.stringify(
-        notes
-      )}`
-    );
-  }
-}
-
-function assertValidSetType(type: string): void {
-  if (!VALID_SET_TYPES.has(type)) {
-    throw new Error(
-      `Invalid set type "${type}": must be one of ${[...VALID_SET_TYPES].join(", ")}`
-    );
-  }
-}
 
 interface HevyExerciseTemplate {
   id: string;

@@ -2,8 +2,13 @@ import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { z } from "zod";
 import { verifyBearerToken } from "@/lib/auth";
 import {
-  listRecentWorkouts,
+  listWorkouts,
+  getWorkoutCount,
+  listWorkoutEvents,
   getWorkoutDetail,
+  createWorkout,
+  updateWorkout,
+  getUserInfo,
   getBodyMeasurements,
   searchExerciseTemplates,
   createRoutine,
@@ -15,11 +20,13 @@ import {
   toCreateRoutineBody,
   toUpdateRoutineBody,
   toCreateRoutineFolderBody,
+  toCreateWorkoutBody,
+  toUpdateWorkoutBody,
 } from "@/lib/hevy";
 
 export const maxDuration = 30;
 
-// Shared schema fragments for the Hevy routine-write tools below.
+// Shared schema fragments for the Hevy workout/routine-write tools below.
 const setTypeSchema = z.enum(["warmup", "normal", "failure", "dropset"]);
 
 const notesSchema = z
@@ -94,6 +101,90 @@ const folderIdSchema = z
     "Routine folder ID to file this under, or null/omit for none — call list_routine_folders first to find an existing folder by title, or create_routine_folder to make a new one"
   );
 
+// Workout sets are recorded/performed sets, not routine templates, so they
+// carry two fields routine sets don't: rpe (perceived exertion of a set
+// that already happened) and customMetric (steps/floors for machine-based
+// cardio exercises).
+const rpeSchema = z
+  .union([
+    z.literal(6),
+    z.literal(7),
+    z.literal(7.5),
+    z.literal(8),
+    z.literal(8.5),
+    z.literal(9),
+    z.literal(9.5),
+    z.literal(10),
+  ])
+  .nullable()
+  .optional()
+  .describe(
+    "Rating of Perceived Exertion for this set, or null/omit — must be exactly one of 6, 7, 7.5, 8, 8.5, 9, 9.5, 10"
+  );
+
+const workoutSetSchema = z.object({
+  type: setTypeSchema.describe(
+    "Set type — must be exactly one of warmup, normal, failure, dropset"
+  ),
+  weightKg: z.number().nullable().optional().describe("Weight lifted in kg, or null/omit"),
+  reps: z.number().int().nullable().optional().describe("Reps performed, or null/omit"),
+  distanceMeters: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Distance covered in meters (cardio), or null/omit"),
+  durationSeconds: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("Duration in seconds (timed sets), or null/omit"),
+  customMetric: z
+    .number()
+    .nullable()
+    .optional()
+    .describe(
+      "Custom metric value — currently only used by Hevy for steps/floors on stair-machine-style exercises, or null/omit"
+    ),
+  rpe: rpeSchema,
+});
+
+const workoutExerciseSchema = z.object({
+  exerciseTemplateId: z
+    .string()
+    .min(1)
+    .describe(
+      "Hevy exercise_template_id — obtain this by calling search_exercise_templates first. Never guess or invent this value."
+    ),
+  supersetId: z
+    .number()
+    .int()
+    .nullable()
+    .optional()
+    .describe("Superset group number linking this to other exercises, or null/omit"),
+  notes: notesSchema.describe('Free-text notes for this exercise. Must not contain "@".'),
+  sets: z.array(workoutSetSchema).min(1).describe("Ordered list of sets actually performed for this exercise"),
+});
+
+const workoutBodySchema = {
+  title: z.string().min(1).describe("Workout title as it will appear in Hevy"),
+  description: notesSchema.describe('Workout-level description/notes. Must not contain "@".'),
+  startTime: z
+    .string()
+    .min(1)
+    .describe("ISO 8601 timestamp of when the workout started, e.g. 2026-08-17T09:00:00Z"),
+  endTime: z.string().min(1).describe("ISO 8601 timestamp of when the workout ended"),
+  isPrivate: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether this workout is private. Hevy documents no default for this field, so fitness-mcp defaults it to false (visible per Hevy's normal sharing rules) when omitted — set explicitly if privacy matters."
+    ),
+  exercises: z
+    .array(workoutExerciseSchema)
+    .min(1)
+    .describe("Ordered list of exercises actually performed in this workout, in order"),
+};
+
 // Every write tool takes this same confirm flag, defaulting to false/dry-run
 // so the tool is safe to call speculatively while drafting content with the
 // user: confirm: false (or omitted) never touches Hevy — it only returns the
@@ -137,29 +228,73 @@ function dryRunPreview(payload: unknown) {
 const handler = createMcpHandler(
   (server) => {
     server.registerTool(
-      "get_recent_workouts",
+      "list_workouts",
       {
-        title: "Get recent Hevy workouts",
+        title: "List Hevy workouts",
         description:
-          "List the user's most recent workouts from Hevy, newest first. Each entry includes title, start/end time, and exercise names.",
+          "List the user's logged workouts from Hevy, newest first, with real pagination. Each entry includes title, the routine it was logged from (if any), start/end time, and exercise names. Call get_workout_count first if you need to know how many pages of history exist.",
         inputSchema: z.object({
-          limit: z
+          page: z.number().int().min(1).optional().describe("Page number, 1-based (default 1)"),
+          pageSize: z
             .number()
             .int()
             .min(1)
             .max(10)
             .optional()
-            .describe(
-              "How many recent workouts to return (max 10, default 5)"
-            ),
+            .describe("How many workouts per page (max 10, default 5)"),
         }),
       },
-      async ({ limit }) => {
-        const workouts = await listRecentWorkouts(limit ?? 5);
+      async ({ page, pageSize }) => {
+        const result = await listWorkouts({ page, pageSize });
         return {
-          content: [
-            { type: "text", text: JSON.stringify(workouts, null, 2) },
-          ],
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "get_workout_count",
+      {
+        title: "Get total Hevy workout count",
+        description:
+          "Get the total number of workouts logged on the user's Hevy account. Useful for deciding how many pages list_workouts has to walk to reach older history.",
+        inputSchema: z.object({}),
+      },
+      async () => {
+        const result = await getWorkoutCount();
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "list_workout_events",
+      {
+        title: "List Hevy workout change events",
+        description:
+          "List workout update/delete events since a given timestamp, newest first — for tracking what changed without re-fetching and diffing every workout yourself. 'updated' events include a workout summary (call get_workout_detail with its id for full exercise/set detail); 'deleted' events include only the id and when it was deleted.",
+        inputSchema: z.object({
+          since: z
+            .string()
+            .optional()
+            .describe(
+              "ISO 8601 timestamp — only return events after this time (default: everything, i.e. 1970-01-01T00:00:00Z)"
+            ),
+          page: z.number().int().min(1).optional().describe("Page number, 1-based (default 1)"),
+          pageSize: z
+            .number()
+            .int()
+            .min(1)
+            .max(10)
+            .optional()
+            .describe("How many events per page (max 10, default 5)"),
+        }),
+      },
+      async ({ since, page, pageSize }) => {
+        const result = await listWorkoutEvents({ since, page, pageSize });
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         };
       }
     );
@@ -169,9 +304,9 @@ const handler = createMcpHandler(
       {
         title: "Get Hevy workout detail",
         description:
-          "Get full exercise/set/rep/weight detail for a single Hevy workout by its ID (obtain the ID from get_recent_workouts).",
+          "Get full exercise/set/rep/weight/RPE detail for a single Hevy workout by its ID (obtain the ID from list_workouts or list_workout_events).",
         inputSchema: z.object({
-          workoutId: z.string().describe("The Hevy workout ID"),
+          workoutId: z.string().min(1).describe("The Hevy workout ID"),
         }),
       },
       async ({ workoutId }) => {
@@ -180,6 +315,74 @@ const handler = createMcpHandler(
           content: [
             { type: "text", text: JSON.stringify(workout, null, 2) },
           ],
+        };
+      }
+    );
+
+    server.registerTool(
+      "create_workout",
+      {
+        title: "Log a new Hevy workout",
+        description:
+          "Log a completed workout — a real training session with actual start/end times, sets, reps, and weights performed — to the user's Hevy account. This logs a record of what was done, not a reusable plan; use create_routine/update_routine instead if the goal is a template to follow later. Without confirm: true this is a no-op dry run that only returns the payload that would be sent — with confirm: true IT IS A REAL WRITE. Show the user the full planned content and get explicit confirmation before setting confirm: true. Every exerciseTemplateId must come from a prior search_exercise_templates call; never guess one.",
+        inputSchema: z.object({
+          ...workoutBodySchema,
+          confirm: confirmSchema,
+        }),
+      },
+      async ({ title, description, startTime, endTime, isPrivate, exercises, confirm }) => {
+        const input = { title, description, startTime, endTime, isPrivate, exercises };
+        if (!confirm) {
+          return dryRunPreview(toCreateWorkoutBody(input));
+        }
+        const workout = await createWorkout(input);
+        return {
+          content: [{ type: "text", text: JSON.stringify(workout, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "update_workout",
+      {
+        title: "Update a Hevy workout",
+        description:
+          "Replace an existing logged Hevy workout's title/description/times/exercises entirely (full overwrite, not a partial patch — omitted exercises are removed). Without confirm: true this is a no-op dry run that only returns the payload that would be sent — with confirm: true IT IS A REAL WRITE. Show the user the complete new content and get explicit confirmation before setting confirm: true. Call get_workout_detail first if you don't already know the workout's exact current contents.",
+        inputSchema: z.object({
+          workoutId: z
+            .string()
+            .min(1)
+            .describe(
+              "The Hevy workout ID to overwrite (from list_workouts/list_workout_events, or supplied by the user)"
+            ),
+          ...workoutBodySchema,
+          confirm: confirmSchema,
+        }),
+      },
+      async ({ workoutId, title, description, startTime, endTime, isPrivate, exercises, confirm }) => {
+        const input = { title, description, startTime, endTime, isPrivate, exercises };
+        if (!confirm) {
+          return dryRunPreview(toUpdateWorkoutBody(input));
+        }
+        const workout = await updateWorkout(workoutId, input);
+        return {
+          content: [{ type: "text", text: JSON.stringify(workout, null, 2) }],
+        };
+      }
+    );
+
+    server.registerTool(
+      "get_user_info",
+      {
+        title: "Get the authenticated Hevy user's info",
+        description:
+          "Get basic info (id, display name, public profile URL) for the Hevy account this server's HEVY_API_KEY belongs to.",
+        inputSchema: z.object({}),
+      },
+      async () => {
+        const info = await getUserInfo();
+        return {
+          content: [{ type: "text", text: JSON.stringify(info, null, 2) }],
         };
       }
     );

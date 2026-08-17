@@ -9,8 +9,15 @@ import {
   listRoutineFolders,
   listRoutines,
   getRoutineDetail,
+  listWorkouts,
+  getWorkoutCount,
+  listWorkoutEvents,
+  getWorkoutDetail,
+  createWorkout,
+  updateWorkout,
+  getUserInfo,
 } from "./hevy";
-import type { CreateRoutineInput } from "./hevy";
+import type { CreateRoutineInput, CreateWorkoutInput } from "./hevy";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
@@ -56,6 +63,57 @@ const routineApiResponse = {
       ],
       created_at: "2026-08-01T00:00:00Z",
       updated_at: "2026-08-01T00:00:00Z",
+    },
+  ],
+};
+
+const baseWorkoutInput: CreateWorkoutInput = {
+  title: "Push day",
+  description: null,
+  startTime: "2026-08-01T10:00:00Z",
+  endTime: "2026-08-01T11:00:00Z",
+  exercises: [
+    {
+      exerciseTemplateId: "tmpl-bench",
+      notes: null,
+      sets: [{ type: "normal", weightKg: 80, reps: 8 }],
+    },
+  ],
+};
+
+// Unlike POST/PUT /v1/routines (wrapped under "routine" as a single-element
+// array — see routineApiResponse above), Hevy's OpenAPI spec documents
+// POST/PUT /v1/workouts as returning a bare Workout object — see the
+// comment above assertWorkoutShape in lib/hevy.ts for the caveat that this
+// is unverified against a real account.
+const workoutApiResponse = {
+  id: "workout-1",
+  title: "Push day",
+  routine_id: null,
+  description: null,
+  start_time: "2026-08-01T10:00:00Z",
+  end_time: "2026-08-01T11:00:00Z",
+  updated_at: "2026-08-01T11:00:00Z",
+  created_at: "2026-08-01T11:00:00Z",
+  exercises: [
+    {
+      index: 0,
+      title: "Bench Press (Barbell)",
+      notes: null,
+      exercise_template_id: "tmpl-bench",
+      supersets_id: null,
+      sets: [
+        {
+          index: 0,
+          type: "normal",
+          weight_kg: 80,
+          reps: 8,
+          distance_meters: null,
+          duration_seconds: null,
+          rpe: null,
+          custom_metric: null,
+        },
+      ],
     },
   ],
 };
@@ -800,5 +858,530 @@ describe("searchExerciseTemplates", () => {
     vi.advanceTimersByTime(11 * 60 * 1000);
     await search("squat");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("listWorkouts", () => {
+  it("GETs /v1/workouts with default page/pageSize and maps the response, including routineId", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/workouts?page=1&pageSize=5");
+      return jsonResponse({
+        page: 1,
+        page_count: 4,
+        workouts: [workoutApiResponse],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await listWorkouts();
+    expect(result).toEqual({
+      page: 1,
+      pageCount: 4,
+      workouts: [
+        {
+          id: "workout-1",
+          title: "Push day",
+          routineId: null,
+          startTime: "2026-08-01T10:00:00Z",
+          endTime: "2026-08-01T11:00:00Z",
+          exerciseCount: 1,
+          exercises: ["Bench Press (Barbell)"],
+        },
+      ],
+    });
+  });
+
+  it("passes page/pageSize through and clamps pageSize to the 1-10 range", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ page: 2, page_count: 4, workouts: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listWorkouts({ page: 2, pageSize: 999 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.hevyapp.com/v1/workouts?page=2&pageSize=10",
+      expect.anything()
+    );
+  });
+
+  it("clamps a page of 0 or negative up to 1", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ page: 1, page_count: 4, workouts: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listWorkouts({ page: -3 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.hevyapp.com/v1/workouts?page=1&pageSize=5",
+      expect.anything()
+    );
+  });
+
+  it("surfaces routineId when a workout was logged from a routine", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          page: 1,
+          page_count: 1,
+          workouts: [{ ...workoutApiResponse, routine_id: "routine-1" }],
+        })
+      )
+    );
+
+    const result = await listWorkouts();
+    expect(result.workouts[0].routineId).toBe("routine-1");
+  });
+});
+
+describe("getWorkoutCount", () => {
+  it("GETs /v1/workouts/count and returns the count", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/workouts/count");
+      return jsonResponse({ workout_count: 42 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await getWorkoutCount()).toEqual({ count: 42 });
+  });
+});
+
+describe("listWorkoutEvents", () => {
+  it("GETs /v1/workouts/events with the default since/page/pageSize", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe(
+        "https://api.hevyapp.com/v1/workouts/events?page=1&pageSize=5&since=1970-01-01T00%3A00%3A00Z"
+      );
+      return jsonResponse({ page: 1, page_count: 1, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listWorkoutEvents();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes a custom since through, URL-encoded", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toContain("since=2026-08-01T00%3A00%3A00Z");
+      return jsonResponse({ page: 1, page_count: 1, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listWorkoutEvents({ since: "2026-08-01T00:00:00Z" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("clamps a page of 0 or negative up to 1", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toContain("page=1&");
+      return jsonResponse({ page: 1, page_count: 1, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listWorkoutEvents({ page: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps 'updated' events to a workout summary and 'deleted' events to id/deletedAt", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          page: 1,
+          page_count: 1,
+          events: [
+            { type: "updated", workout: workoutApiResponse },
+            { type: "deleted", id: "workout-2", deleted_at: "2026-08-02T00:00:00Z" },
+          ],
+        })
+      )
+    );
+
+    const result = await listWorkoutEvents();
+    expect(result).toEqual({
+      page: 1,
+      pageCount: 1,
+      events: [
+        {
+          type: "updated",
+          workout: {
+            id: "workout-1",
+            title: "Push day",
+            routineId: null,
+            startTime: "2026-08-01T10:00:00Z",
+            endTime: "2026-08-01T11:00:00Z",
+            exerciseCount: 1,
+            exercises: ["Bench Press (Barbell)"],
+          },
+        },
+        { type: "deleted", id: "workout-2", deletedAt: "2026-08-02T00:00:00Z" },
+      ],
+    });
+  });
+});
+
+describe("getWorkoutDetail", () => {
+  it("GETs /v1/workouts/{id} and returns full exercise/set detail including exerciseTemplateId/supersetId/customMetric/routineId", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/workouts/workout-1");
+      return jsonResponse({
+        ...workoutApiResponse,
+        routine_id: "routine-1",
+        exercises: [
+          {
+            ...workoutApiResponse.exercises[0],
+            supersets_id: 2,
+            sets: [{ ...workoutApiResponse.exercises[0].sets[0], rpe: 8.5, custom_metric: 12 }],
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getWorkoutDetail("workout-1");
+    expect(result).toEqual({
+      id: "workout-1",
+      title: "Push day",
+      routineId: "routine-1",
+      description: null,
+      startTime: "2026-08-01T10:00:00Z",
+      endTime: "2026-08-01T11:00:00Z",
+      exercises: [
+        {
+          exerciseTemplateId: "tmpl-bench",
+          title: "Bench Press (Barbell)",
+          notes: null,
+          supersetId: 2,
+          sets: [
+            {
+              type: "normal",
+              weightKg: 80,
+              reps: 8,
+              distanceMeters: null,
+              durationSeconds: null,
+              rpe: 8.5,
+              customMetric: 12,
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("URL-encodes a workoutId containing special characters", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/workouts/foo%2Fbar..");
+      return jsonResponse(workoutApiResponse);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getWorkoutDetail("foo/bar..");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createWorkout", () => {
+  it("POSTs the correctly shaped request body", async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/workouts");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body as string)).toEqual({
+        workout: {
+          title: "Push day",
+          description: null,
+          start_time: "2026-08-01T10:00:00Z",
+          end_time: "2026-08-01T11:00:00Z",
+          is_private: false,
+          exercises: [
+            {
+              exercise_template_id: "tmpl-bench",
+              superset_id: null,
+              notes: null,
+              sets: [
+                {
+                  type: "normal",
+                  weight_kg: 80,
+                  reps: 8,
+                  distance_meters: null,
+                  duration_seconds: null,
+                  rpe: null,
+                  custom_metric: null,
+                },
+              ],
+            },
+          ],
+        },
+      });
+      return jsonResponse(workoutApiResponse, 201);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createWorkout(baseWorkoutInput);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      id: "workout-1",
+      title: "Push day",
+      routineId: null,
+      startTime: "2026-08-01T10:00:00Z",
+      endTime: "2026-08-01T11:00:00Z",
+      exerciseCount: 1,
+    });
+  });
+
+  it("defaults isPrivate to false when omitted", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      expect(body.workout.is_private).toBe(false);
+      return jsonResponse(workoutApiResponse, 201);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createWorkout(baseWorkoutInput);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects exercise notes containing "@" without calling fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createWorkout({
+        ...baseWorkoutInput,
+        exercises: [{ ...baseWorkoutInput.exercises[0], notes: "cc @coach" }],
+      })
+    ).rejects.toThrow(/must not contain "@"/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a workout-level description containing "@" without calling fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createWorkout({ ...baseWorkoutInput, description: "ping me @coach" })
+    ).rejects.toThrow(/must not contain "@"/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid set type without calling fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createWorkout({
+        ...baseWorkoutInput,
+        exercises: [
+          {
+            ...baseWorkoutInput.exercises[0],
+            sets: [{ type: "working" as CreateWorkoutInput["exercises"][number]["sets"][number]["type"], reps: 5 }],
+          },
+        ],
+      })
+    ).rejects.toThrow(/Invalid set type "working"/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid rpe value without calling fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createWorkout({
+        ...baseWorkoutInput,
+        exercises: [
+          {
+            ...baseWorkoutInput.exercises[0],
+            sets: [{ type: "normal", reps: 5, rpe: 8.25 }],
+          },
+        ],
+      })
+    ).rejects.toThrow(/Invalid rpe 8.25/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts every documented rpe value", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(workoutApiResponse, 201)));
+
+    for (const rpe of [6, 7, 7.5, 8, 8.5, 9, 9.5, 10]) {
+      await expect(
+        createWorkout({
+          ...baseWorkoutInput,
+          exercises: [{ ...baseWorkoutInput.exercises[0], sets: [{ type: "normal", reps: 5, rpe }] }],
+        })
+      ).resolves.toBeDefined();
+    }
+  });
+
+  it("never leaks read-only fields into the outgoing request body", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const raw = init.body as string;
+      expect(raw).not.toContain("created_at");
+      expect(raw).not.toContain("\"id\"");
+      return jsonResponse(workoutApiResponse, 201);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pollutedInput = {
+      ...baseWorkoutInput,
+      id: "should-not-be-sent",
+      created_at: "should-not-be-sent",
+    } as unknown as CreateWorkoutInput;
+
+    await createWorkout(pollutedInput);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates the raw Hevy error body on a non-2xx response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: "validation_error" }, 422))
+    );
+
+    await expect(createWorkout(baseWorkoutInput)).rejects.toThrow(/validation_error/);
+  });
+
+  it("throws a clear diagnostic (not a TypeError) if Hevy returns an unexpected shape", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ not: "a workout" }, 201)));
+
+    await expect(createWorkout(baseWorkoutInput)).rejects.toThrow(
+      /Unexpected Hevy workout response shape/
+    );
+  });
+});
+
+describe("updateWorkout", () => {
+  it("PUTs to /v1/workouts/{workoutId} with the correct URL and method", async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/workouts/workout-1");
+      expect(init.method).toBe("PUT");
+      return jsonResponse(workoutApiResponse, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await updateWorkout("workout-1", baseWorkoutInput);
+    expect(result.id).toBe("workout-1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects notes containing "@" without calling fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateWorkout("workout-1", {
+        ...baseWorkoutInput,
+        exercises: [{ ...baseWorkoutInput.exercises[0], notes: "@bad" }],
+      })
+    ).rejects.toThrow(/must not contain "@"/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a workout-level description containing "@" without calling fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateWorkout("workout-1", { ...baseWorkoutInput, description: "ping me @coach" })
+    ).rejects.toThrow(/must not contain "@"/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid set type without calling fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateWorkout("workout-1", {
+        ...baseWorkoutInput,
+        exercises: [
+          {
+            ...baseWorkoutInput.exercises[0],
+            sets: [{ type: "working" as CreateWorkoutInput["exercises"][number]["sets"][number]["type"], reps: 5 }],
+          },
+        ],
+      })
+    ).rejects.toThrow(/Invalid set type "working"/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid rpe value without calling fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateWorkout("workout-1", {
+        ...baseWorkoutInput,
+        exercises: [
+          {
+            ...baseWorkoutInput.exercises[0],
+            sets: [{ type: "normal", reps: 5, rpe: 8.25 }],
+          },
+        ],
+      })
+    ).rejects.toThrow(/Invalid rpe 8.25/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("never leaks read-only fields into the outgoing request body", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const raw = init.body as string;
+      expect(raw).not.toContain("created_at");
+      expect(raw).not.toContain("\"id\"");
+      return jsonResponse(workoutApiResponse, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pollutedInput = {
+      ...baseWorkoutInput,
+      id: "should-not-be-sent",
+      created_at: "should-not-be-sent",
+    } as unknown as CreateWorkoutInput;
+
+    await updateWorkout("workout-1", pollutedInput);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates the raw Hevy error body on a non-2xx response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: "validation_error" }, 422))
+    );
+
+    await expect(updateWorkout("workout-1", baseWorkoutInput)).rejects.toThrow(
+      /validation_error/
+    );
+  });
+
+  it("throws a clear diagnostic (not a TypeError) if Hevy returns an unexpected shape", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ not: "a workout" }, 200)));
+
+    await expect(updateWorkout("workout-1", baseWorkoutInput)).rejects.toThrow(
+      /Unexpected Hevy workout response shape/
+    );
+  });
+
+  it("URL-encodes a workoutId containing special characters", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/workouts/foo%2Fbar..");
+      return jsonResponse(workoutApiResponse, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateWorkout("foo/bar..", baseWorkoutInput);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getUserInfo", () => {
+  it("GETs /v1/user/info and returns id/name/profileUrl", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("https://api.hevyapp.com/v1/user/info");
+      return jsonResponse({
+        data: { id: "user-1", name: "Jane Doe", url: "https://hevy.com/user/jane" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await getUserInfo()).toEqual({
+      id: "user-1",
+      name: "Jane Doe",
+      profileUrl: "https://hevy.com/user/jane",
+    });
   });
 });
