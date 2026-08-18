@@ -37,8 +37,11 @@ yarn-error.log*
 # vercel
 .vercel
 
-# Claude Code local tooling state (e.g. isolated subagent worktrees)
-.claude/
+# Claude Code local tooling state (e.g. isolated subagent worktrees) —
+# except .claude/skills/, which is checked-in project documentation (see
+# .claude/skills/hevy-routine-builder/SKILL.md), not local/ephemeral state.
+.claude/*
+!.claude/skills/
 
 # typescript
 *.tsbuildinfo

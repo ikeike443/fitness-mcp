@@ -12,3 +12,11 @@ If the review finds nothing, stop after step 1 — no fix subagent needed.
 This loop is the default when nothing else is specified. If the user gives explicit instructions about a specific self-opened PR — e.g. "just review this one, don't fix it yet", "hold off on fixing", or any other specific ask — those instructions win for that PR, overriding the automatic loop (including its automatic fix-and-push step), even though the assistant opened the PR itself.
 
 When asked to review a PR that already existed before the current turn/request (e.g. reviewing someone else's PR, or a plain "review PR #N" request for a PR opened in an earlier session or task — as opposed to one the assistant is opening as part of the current task), post the review with findings first, as a separate step from fixing them. Don't fix-then-report in the same motion — it reads as unclear/backwards about what's already done vs. still open. Wait for the user (or a follow-up instruction) before pushing fixes for what the review found.
+
+## Hevy write-tool safety
+
+This server's `create_*`/`update_*` MCP tools (`create_routine`, `update_routine`, `create_routine_folder`, `create_workout`, `update_workout`, `create_custom_exercise_template`, `create_body_measurement`, `update_body_measurement`) are real writes to whatever Hevy account `HEVY_API_KEY` points at, with no delete endpoint anywhere in Hevy's API to undo one automatically. This applies whenever this session calls those tools directly against a real account — most likely while doing the README's "Manually verifying Hevy write operations" checklist after a change to `lib/hevy.ts` or `app/api/mcp/route.ts`.
+
+- Always call with `confirm` omitted/`false` first and show the returned `dryRun` payload to the user before ever setting `confirm: true`.
+- Prefer an obviously-throwaway title/date for anything written during manual verification (e.g. `"fitness-mcp manual test — delete me"`), and follow through on deleting it manually in the Hevy app afterward per the checklist — this session cannot do that step itself, since there is no delete tool.
+- When the task is specifically about building/editing a Hevy routine (as opposed to verifying a code change), read `.claude/skills/hevy-routine-builder/SKILL.md` first — it covers weight/rep selection, the pre-write confirmation step, and folder handling in detail.
