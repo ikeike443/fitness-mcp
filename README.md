@@ -8,6 +8,10 @@ A personal remote MCP (Model Context Protocol) server that lets Claude read and 
 
 [MIT](./LICENSE)
 
+## Contributing
+
+Bug reports and PRs are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for the dev setup, coding conventions, and what's expected of a PR that touches a write tool.
+
 ## Status
 
 - **Hevy**: fully implemented against Hevy's public OpenAPI spec — read: workouts (paginated list, count, change events, detail), exercise history, body measurements (recent list and full detail by date), exercise template search and detail, routine folder listing and detail, routine listing and detail, and basic account info. Write: create/update workouts (real logged training sessions), create/update routines (reusable workout plan templates), routine folders, custom exercise templates, and body measurements — so a training menu, an actual session, a brand-new exercise, or a new measurement can all be pushed directly into the Hevy app from conversation. Uses the official Hevy REST API directly. `lib/hevy/openapi-snapshot.json` is a checked-in copy of Hevy's public OpenAPI spec — every endpoint in it now has a corresponding MCP tool.
@@ -42,6 +46,10 @@ A personal remote MCP (Model Context Protocol) server that lets Claude read and 
 `create_workout`/`update_workout` log or replace a real training session (what was actually done, with real start/end times and performed sets); `create_routine`/`update_routine` create or replace a reusable plan/template. Use the workout tools for "log what I just did" and the routine tools for "design a plan I can follow later."
 
 The `write` tools make real changes to the user's Hevy account (creating/replacing workouts, routines, folders, exercise templates, and body measurements). Every write tool takes a `confirm` argument that defaults to `false`: with `confirm` false or omitted, the tool is a no-op dry run — it never calls the Hevy API, and instead returns the exact payload it would have sent, wrapped as `{ dryRun: true, payload: {...} }`. Only `confirm: true` performs the real write. Tool descriptions also instruct the calling LLM to show the user the full planned content and get explicit confirmation before setting `confirm: true` — but since that argument is set by the same LLM deciding whether to call the tool at all, this instruction is not a guarantee of human confirmation on its own; the dry-run default is what actually prevents an accidental real write regardless of what the LLM does. There is no scope separation between read and write tools at the authentication layer (see Authentication below) — any authenticated caller can invoke any tool.
+
+### Building routines with Claude Code
+
+[`.claude/skills/hevy-routine-builder/SKILL.md`](./.claude/skills/hevy-routine-builder/SKILL.md) is a [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills) checked into this repo: if you fork it and use Claude Code against your fork, Claude picks this up automatically whenever you ask it to build or edit a Hevy routine through these tools. It covers picking weights from your real training history, the pre-write confirmation step, and folder handling — feel free to read it even if you're driving the tools through Claude.ai/the app instead of Claude Code, and to adapt it to your own preferences (rep/rest defaults, etc.).
 
 ## Authentication
 

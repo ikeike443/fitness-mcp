@@ -1,6 +1,15 @@
 {
   "name": "fitness-mcp",
   "version": "0.1.0",
+  "description": "Personal remote MCP server that lets Claude read and manage your Hevy workout data — workouts, routines, exercise templates, and body measurements — directly in conversation.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "hevy",
+    "fitness",
+    "workout",
+    "claude"
+  ],
   "private": true,
   "license": "MIT",
   "scripts": {
