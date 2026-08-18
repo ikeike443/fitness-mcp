@@ -1,7 +1,7 @@
 export default function Home() {
   return (
     <main style={{ fontFamily: "sans-serif", padding: "2rem" }}>
-      <h1>fitness-mcp</h1>
+      <h1>hevy-fitness-mcp</h1>
       <p>MCP server is running. Endpoint: <code>/api/mcp</code></p>
     </main>
   );

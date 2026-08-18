@@ -323,7 +323,7 @@ export interface CreateWorkoutInput {
   description?: string | null;
   startTime: string;
   endTime: string;
-  // Hevy's spec gives no documented default for is_private, so fitness-mcp
+  // Hevy's spec gives no documented default for is_private, so hevy-fitness-mcp
   // picks one explicitly (false) rather than omitting the field and letting
   // Hevy decide — see the isPrivate schema description in
   // app/api/mcp/route.ts, which surfaces this as our own choice, not a

@@ -187,7 +187,7 @@ const workoutBodySchema = {
     .boolean()
     .optional()
     .describe(
-      "Whether this workout is private. Hevy documents no default for this field, so fitness-mcp defaults it to false (visible per Hevy's normal sharing rules) when omitted — set explicitly if privacy matters."
+      "Whether this workout is private. Hevy documents no default for this field, so hevy-fitness-mcp defaults it to false (visible per Hevy's normal sharing rules) when omitted — set explicitly if privacy matters."
     ),
   exercises: z
     .array(workoutExerciseSchema)
@@ -962,7 +962,7 @@ const handler = createMcpHandler(
     );
   },
   {
-    serverInfo: { name: "fitness-mcp", version: "0.1.0" },
+    serverInfo: { name: "hevy-fitness-mcp", version: "0.1.0" },
   }
 );
 

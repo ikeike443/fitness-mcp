@@ -1,4 +1,4 @@
-# Contributing to fitness-mcp
+# Contributing to hevy-fitness-mcp
 
 Thanks for considering a contribution. This is a small, personal-deploy MCP server (fork it, point it at your own Hevy account, deploy your own copy — see the README) rather than a hosted multi-tenant service, so the bar for contributions is "does this make the codebase better for people running their own fork," not "does this need to work for a shared production fleet."
 

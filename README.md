@@ -1,4 +1,4 @@
-# fitness-mcp
+# hevy-fitness-mcp
 
 ![CI](https://github.com/ikeike443/fitness-mcp/actions/workflows/ci.yml/badge.svg)
 
@@ -122,7 +122,7 @@ CI never touches real Hevy data, so the write tools (`create_routine`, `update_r
 
 1. Set a real `HEVY_API_KEY` in `.env.local`, then run `vercel dev`.
 2. Call `search_exercise_templates` with a real query (e.g. via the smoke-test `curl` pattern above, using `tools/call` instead of `tools/list`) and confirm real candidates come back.
-3. Call `create_routine` with an obviously-throwaway title (e.g. `"fitness-mcp manual test — delete me"`) and no `confirm` (or `confirm: false`) first, and check the returned `dryRun: true` payload looks right — nothing is written yet. Then call it again with `confirm: true`, and note the returned `id`.
+3. Call `create_routine` with an obviously-throwaway title (e.g. `"hevy-fitness-mcp manual test — delete me"`) and no `confirm` (or `confirm: false`) first, and check the returned `dryRun: true` payload looks right — nothing is written yet. Then call it again with `confirm: true`, and note the returned `id`.
 4. Open the Hevy app or web app and visually confirm the routine was created with the expected exercises, sets, reps, and weights.
 5. Check whether the returned `webUrl` (`https://hevy.com/routines/{id}`) actually opens the routine — it's an unverified best-effort guess at Hevy's URL pattern, not a documented API field. If it doesn't resolve, that's worth a follow-up to remove or fix the field.
 6. Call `get_routine_detail` with that `id` and confirm the returned exercises/sets/reps/weights match what you just created — this also confirms the `title` and `superset_id` fields actually come back on a real GET response (see the "unverified" comments on those fields in `lib/hevy.ts`). Call `list_routines` (with no `folderId`, then with the folder's id, then with `folderId: null`) and confirm the new routine shows up in the right buckets.
@@ -159,7 +159,7 @@ Set these in the Vercel project's Environment Variables (Production + Preview). 
 1. `vercel link`
 2. `vercel env add HEVY_API_KEY` / `vercel env add MCP_BEARER_TOKEN` / `vercel env add OAUTH_CLIENT_ID` / `vercel env add OAUTH_CLIENT_SECRET` (repeat for each environment you use)
 3. Connect this GitHub repo in the Vercel dashboard for auto-deploy on push to `main`, or run `vercel --prod` manually.
-4. Note the deployed URL. `fitness-mcp.vercel.app` is often already taken by an unrelated project on Vercel's shared `.vercel.app` namespace — check the actual assigned domain under Project → Settings → Domains (or `vercel inspect <deployment-url>`). This project's production URL is `https://fitness-mcp-eight.vercel.app/api/mcp`.
+4. Note the deployed URL. `hevy-fitness-mcp.vercel.app` is often already taken by an unrelated project on Vercel's shared `.vercel.app` namespace — check the actual assigned domain under Project → Settings → Domains (or `vercel inspect <deployment-url>`). This project's production URL is `https://fitness-mcp-eight.vercel.app/api/mcp`.
 
 ## Connect to Claude
 
