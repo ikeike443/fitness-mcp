@@ -1,6 +1,6 @@
 # hevy-fitness-mcp
 
-![CI](https://github.com/ikeike443/fitness-mcp/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/ikeike443/hevy-fitness-mcp/actions/workflows/ci.yml/badge.svg)
 
 A personal remote MCP (Model Context Protocol) server that lets Claude read and manage your [Hevy](https://hevy.com) workout data directly in conversation. Deployed on Vercel's free Hobby tier.
 
