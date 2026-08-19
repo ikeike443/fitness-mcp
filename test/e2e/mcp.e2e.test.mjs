@@ -69,7 +69,7 @@ after(() => {
 test("root page responds and identifies the server", async () => {
   const res = await fetch(BASE_URL);
   assert.equal(res.status, 200);
-  assert.match(await res.text(), /fitness-mcp/);
+  assert.match(await res.text(), /hevy-fitness-mcp/);
 });
 
 test("rejects unauthenticated MCP requests with 401", async () => {
