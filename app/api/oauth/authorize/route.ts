@@ -3,20 +3,14 @@ import {
   isAllowedRedirectUri,
   verifyClientId,
 } from "@/lib/oauth";
-import {
-  buildSecurityEvent,
-  logSecurityEvent,
-  scheduleSecurityAlert,
-} from "@/lib/securityAlert";
+import { reportSecurityFailure } from "@/lib/securityAlert";
 
 function reportOAuthFailure(
   req: Request,
   reason: string,
   extra?: Record<string, unknown>
 ): void {
-  const evt = buildSecurityEvent(req, "oauth_authorize_failure", reason, extra);
-  logSecurityEvent(evt);
-  scheduleSecurityAlert(evt);
+  reportSecurityFailure(req, "oauth_authorize_failure", reason, extra);
 }
 
 export async function GET(req: Request) {

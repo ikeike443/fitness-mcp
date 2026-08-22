@@ -162,7 +162,7 @@ Every authentication failure — a bad/missing `MCP_BEARER_TOKEN`, an invalid OA
 Set `SECURITY_ALERT_WEBHOOK_URL` to a Slack or Discord "incoming webhook" URL to additionally get a real-time push notification for each failure, instead of only finding out if you happen to open the Vercel log viewer:
 
 - Slack: create one at https://api.slack.com/messaging/webhooks
-- Discord: Server Settings → Integrations → Webhooks → New Webhook, then use the "Copy Webhook URL" value directly (Discord accepts the same `{"text": "..."}` payload shape as Slack)
+- Discord: Server Settings → Integrations → Webhooks → New Webhook, then use the "Copy Webhook URL" value directly. Discord's native webhook endpoint expects a `content` field rather than Slack's `text`, so this server sends both keys in the same POST body — no need to append `/slack` to the URL.
 
 The logged/alerted event never includes the actual token, secret, or code value being checked — only metadata about the failed attempt (reason, best-effort client IP, user agent, path, time). Webhook delivery is best-effort and non-blocking (it never adds latency to the auth check, and a failed webhook POST logs its own `security_alert_delivery_failed` event rather than failing silently).
 

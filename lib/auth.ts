@@ -1,10 +1,6 @@
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { timingSafeEqualStrings } from "./timingSafeEqualStrings";
-import {
-  buildSecurityEvent,
-  logSecurityEvent,
-  scheduleSecurityAlert,
-} from "./securityAlert";
+import { reportSecurityFailure } from "./securityAlert";
 
 /**
  * Verifies the bearer token against MCP_BEARER_TOKEN.
@@ -51,7 +47,5 @@ export function verifyBearerToken(
 }
 
 function reportAuthFailure(req: Request, reason: string): void {
-  const evt = buildSecurityEvent(req, "mcp_auth_failure", reason);
-  logSecurityEvent(evt); // always — visible in Vercel's function logs
-  scheduleSecurityAlert(evt); // best-effort webhook, non-blocking
+  reportSecurityFailure(req, "mcp_auth_failure", reason);
 }

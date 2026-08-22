@@ -38,11 +38,22 @@ export interface SecurityEvent {
 }
 
 /**
- * Best-effort client IP extraction. Vercel sets x-forwarded-for on every
- * request; this is not spoof-proof against a client setting its own
- * x-forwarded-for header directly (Vercel's edge overwrites/appends rather
- * than trusting the client blindly, but treat this as "best available
- * signal for triage", not a security control in itself).
+ * Best-effort client IP extraction. This is a triage signal only, NOT a
+ * security control — do not use it for allow/deny decisions, rate limiting,
+ * or anything else that assumes it can't be forged.
+ *
+ * We take the leftmost entry of `x-forwarded-for`, which is the entry a
+ * client can set itself: `x-forwarded-for` is a comma-separated list that
+ * each proxy hop is expected to *append* to, so the leftmost value is
+ * whatever the original request arrived with (attacker-controlled) and the
+ * rightmost entries are the ones added by infrastructure closer to us. This
+ * code assumes Vercel's edge appends the real connecting IP as a trusted
+ * hop rather than overwriting/discarding a spoofed incoming header — that
+ * assumption is not verified here (it would need a real Vercel deployment
+ * to confirm) and may not hold. Net effect: this value may simply be
+ * whatever an attacker chose to send, not the true connecting IP. Treat it
+ * as "best available hint for a human reading the logs", never as proof of
+ * where a request came from.
  */
 export function getClientIp(req: Request): string {
   const xff = req.headers.get("x-forwarded-for");
@@ -53,21 +64,57 @@ export function getClientIp(req: Request): string {
   return req.headers.get("x-real-ip") ?? "unknown";
 }
 
+/**
+ * Truncates a string value so a single oversized attacker-controlled field
+ * (redirect_uri, client_id, user-agent, etc.) can't blow up the logged JSON
+ * line or webhook message body. Non-string values are passed through
+ * unchanged — callers only apply this to fields expected to be strings.
+ */
+export function truncate(value: unknown, max = 200): unknown {
+  if (typeof value !== "string" || value.length <= max) return value;
+  return `${value.slice(0, max)}...[truncated]`;
+}
+
 export function buildSecurityEvent(
   req: Request,
   event: string,
   reason: string,
   extra: Record<string, unknown> = {}
 ): SecurityEvent {
+  const truncatedExtra: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(extra)) {
+    truncatedExtra[key] = truncate(value);
+  }
   return {
     event,
     reason,
     ip: getClientIp(req),
-    userAgent: req.headers.get("user-agent") ?? "unknown",
+    userAgent: truncate(req.headers.get("user-agent") ?? "unknown") as string,
     path: new URL(req.url).pathname,
     time: new Date().toISOString(),
-    ...extra,
+    ...truncatedExtra,
   };
+}
+
+/**
+ * Shared plumbing for every auth-failure reporting call site in this repo:
+ * build the structured event, always log it, and best-effort schedule the
+ * webhook alert. `event` distinguishes which surface failed
+ * ("mcp_auth_failure", "oauth_authorize_failure", "oauth_token_failure");
+ * `reason` distinguishes why. Callers typically wrap this with a
+ * fixed-`event` helper (see reportAuthFailure in lib/auth.ts and
+ * reportOAuthFailure in the two OAuth route files) rather than calling it
+ * directly.
+ */
+export function reportSecurityFailure(
+  req: Request,
+  event: string,
+  reason: string,
+  extra?: Record<string, unknown>
+): void {
+  const evt = buildSecurityEvent(req, event, reason, extra);
+  logSecurityEvent(evt); // always — visible in Vercel's function logs
+  scheduleSecurityAlert(evt); // best-effort webhook, non-blocking
 }
 
 /**
@@ -116,10 +163,17 @@ export async function sendSecurityAlert(e: SecurityEvent): Promise<void> {
     await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // Slack and Discord incoming webhooks both accept a top-level "text"
-      // field. If you point this at some other webhook provider, adjust
-      // the body shape to match what it expects.
+      // Slack's incoming-webhook format wants a top-level "text" field.
+      // Discord's *native* incoming-webhook format wants "content" instead
+      // — it only understands "text" at the Slack-compatibility endpoint
+      // (same URL + "/slack" suffix). Sending both keys means this same
+      // body works unmodified against a bare Discord webhook URL, a
+      // Discord webhook URL with "/slack" appended, and a Slack webhook
+      // URL — each provider ignores keys it doesn't recognize. If you
+      // point this at some other webhook provider, adjust the body shape
+      // to match what it expects.
       body: JSON.stringify({
+        content: `🚨 [${e.event}] ${e.reason} — ip=${e.ip} path=${e.path} ua="${e.userAgent}" at ${e.time}`,
         text: `🚨 [${e.event}] ${e.reason} — ip=${e.ip} path=${e.path} ua="${e.userAgent}" at ${e.time}`,
       }),
       signal: AbortSignal.timeout(3000),

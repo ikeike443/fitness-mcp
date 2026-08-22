@@ -26,6 +26,7 @@ function base64Url(buf) {
 }
 
 let serverProcess;
+let stderrBuffer = "";
 
 async function waitForServer(url, timeoutMs = 30_000) {
   const start = Date.now();
@@ -39,6 +40,31 @@ async function waitForServer(url, timeoutMs = 30_000) {
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
   throw new Error(`Server did not become ready within ${timeoutMs}ms`);
+}
+
+// Polls the accumulated stderr buffer for a structured JSON log line
+// matching `predicate` (e.g. a particular `event`/`reason`). The security
+// logging in lib/securityAlert.ts writes synchronously via console.error,
+// but the pipe from the child process is still async from this process's
+// point of view, so the line may arrive slightly after the HTTP response.
+async function waitForStderrLine(predicate, timeoutMs = 5_000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    for (const line of stderrBuffer.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("{")) continue;
+      try {
+        const json = JSON.parse(trimmed);
+        if (predicate(json)) return json;
+      } catch {
+        // Not a JSON line (e.g. Next's own request logging); ignore.
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    `Timed out waiting for matching stderr log line. Captured stderr:\n${stderrBuffer}`
+  );
 }
 
 before(async () => {
@@ -57,6 +83,7 @@ before(async () => {
 
   serverProcess.stderr.on("data", (chunk) => {
     process.stderr.write(`[next start] ${chunk}`);
+    stderrBuffer += chunk.toString();
   });
 
   await waitForServer(BASE_URL);
@@ -235,4 +262,16 @@ test("rejects a token exchange with the wrong client_secret", async () => {
     }).toString(),
   });
   assert.equal(tokenRes.status, 401);
+
+  // The failure must produce a structured stderr log line (not just the
+  // 401 response) and that line must never contain the real client secret.
+  const logged = await waitForStderrLine(
+    (json) =>
+      json.event === "oauth_token_failure" && json.reason === "invalid_client"
+  );
+  assert.equal(logged.event, "oauth_token_failure");
+  assert.equal(logged.reason, "invalid_client");
+  const loggedText = JSON.stringify(logged);
+  assert.doesNotMatch(loggedText, new RegExp(OAUTH_CLIENT_SECRET));
+  assert.doesNotMatch(stderrBuffer, new RegExp(OAUTH_CLIENT_SECRET));
 });

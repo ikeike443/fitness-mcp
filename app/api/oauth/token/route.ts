@@ -3,11 +3,7 @@ import {
   verifyClientCredentials,
   verifyPkce,
 } from "@/lib/oauth";
-import {
-  buildSecurityEvent,
-  logSecurityEvent,
-  scheduleSecurityAlert,
-} from "@/lib/securityAlert";
+import { reportSecurityFailure } from "@/lib/securityAlert";
 
 function jsonError(error: string, status = 400) {
   return Response.json({ error }, { status });
@@ -18,9 +14,7 @@ function reportOAuthFailure(
   reason: string,
   extra?: Record<string, unknown>
 ): void {
-  const evt = buildSecurityEvent(req, "oauth_token_failure", reason, extra);
-  logSecurityEvent(evt);
-  scheduleSecurityAlert(evt);
+  reportSecurityFailure(req, "oauth_token_failure", reason, extra);
 }
 
 async function readParams(req: Request): Promise<URLSearchParams> {
@@ -43,6 +37,10 @@ export async function POST(req: Request) {
   try {
     params = await readParams(req);
   } catch {
+    // Malformed body (bad JSON, garbage form-encoding) — distinct reason
+    // from invalid_request_missing_fields below so a probe sending garbage
+    // isn't confused with a legitimate client that merely omitted a field.
+    reportOAuthFailure(req, "invalid_request_malformed_body");
     return jsonError("invalid_request");
   }
 

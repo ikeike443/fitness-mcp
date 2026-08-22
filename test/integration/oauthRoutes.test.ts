@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { GET as authorizeGET } from "../../app/api/oauth/authorize/route";
 import { POST as tokenPOST } from "../../app/api/oauth/token/route";
 import { computeCodeChallengeS256 } from "../../lib/oauth";
@@ -180,6 +180,30 @@ describe("POST /api/oauth/token", () => {
     );
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("unsupported_grant_type");
+  });
+
+  it("logs and reports a distinct reason for a malformed (unparsable) body", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const req = new Request("https://fitness-mcp.example/api/oauth/token", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{not valid json",
+      });
+      const res = await tokenPOST(req);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_request");
+
+      const loggedLine = errorSpy.mock.calls
+        .map(([line]) => String(line))
+        .find((line) => line.includes("oauth_token_failure"));
+      expect(loggedLine).toBeTruthy();
+      const logged = JSON.parse(loggedLine!);
+      expect(logged.event).toBe("oauth_token_failure");
+      expect(logged.reason).toBe("invalid_request_malformed_body");
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("documented tradeoff: a code can be redeemed more than once within its TTL (no replay store)", async () => {
