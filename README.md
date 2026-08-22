@@ -151,8 +151,22 @@ CI never touches real Hevy data, so the write tools (`create_routine`, `update_r
 | `MCP_BEARER_TOKEN` | Shared secret this server requires on every request, and the access_token our OAuth flow issues — see Authentication above |
 | `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` | Credentials for this server's own minimal OAuth authorization server — see Authentication above |
 | `OAUTH_ALLOWED_REDIRECT_HOSTS` | Optional. Comma-separated allowlist for `/api/oauth/authorize`'s `redirect_uri`. Defaults to `claude.ai,claude.com` |
+| `SECURITY_ALERT_WEBHOOK_URL` | Optional. A Slack or Discord incoming-webhook URL — see "Security logging and alerting" below |
 
 Set these in the Vercel project's Environment Variables (Production + Preview). Never commit real values — `.env.example` only documents the names.
+
+## Security logging and alerting
+
+Every authentication failure — a bad/missing `MCP_BEARER_TOKEN`, an invalid OAuth `client_id`/`client_secret`, a bad PKCE verifier, or a disallowed `redirect_uri` — is logged as one line of structured JSON to `stderr` via `lib/securityAlert.ts`. On Vercel this always shows up in the function's logs, with no configuration required, so a leaked/guessed bearer token being probed doesn't go unnoticed.
+
+Set `SECURITY_ALERT_WEBHOOK_URL` to a Slack or Discord "incoming webhook" URL to additionally get a real-time push notification for each failure, instead of only finding out if you happen to open the Vercel log viewer:
+
+- Slack: create one at https://api.slack.com/messaging/webhooks
+- Discord: Server Settings → Integrations → Webhooks → New Webhook, then use the "Copy Webhook URL" value directly (Discord accepts the same `{"text": "..."}` payload shape as Slack)
+
+The logged/alerted event never includes the actual token, secret, or code value being checked — only metadata about the failed attempt (reason, best-effort client IP, user agent, path, time). Webhook delivery is best-effort and non-blocking (it never adds latency to the auth check, and a failed webhook POST logs its own `security_alert_delivery_failed` event rather than failing silently).
+
+This is a simple "alert on every failure" design, not a rate-limited or threshold-based one — reasonable for a personal, single-user server where genuine auth failures should be rare. If a scanner's background noise ever makes that noisy, or the bearer token is suspected to have leaked, prefer rotating `MCP_BEARER_TOKEN`/`OAUTH_CLIENT_SECRET` over trying to filter the alerts.
 
 ## Deploy
 
